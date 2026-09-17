@@ -32,6 +32,74 @@ from vimcord.client.audio.ringtone import (
 logger = logging.getLogger("VimCord.AudioManager")
 
 
+class RealtimeNoiseFilter:
+    """
+    Real-time audio DSP filter:
+    1. 80Hz High-Pass Filter (cuts low-frequency mic rumble, desk bumps, AC hum)
+    2. Dynamic noise floor tracking (estimates steady-state background hiss/fan noise)
+    3. Spectral Subtraction / Soft Noise Gating with smooth exponential attack and release
+    """
+    def __init__(self, sample_rate: int = 48000, frame_size: int = 960):
+        self.sample_rate = sample_rate
+        self.frame_size = frame_size
+        self.has_scipy = False
+        try:
+            from scipy.signal import butter
+            self.b, self.a = butter(2, 80.0 / (sample_rate / 2.0), btype='highpass')
+            self.zi = np.zeros(max(len(self.a), len(self.b)) - 1, dtype=np.float32)
+            self.has_scipy = True
+        except Exception:
+            self.prev_x = 0.0
+            self.prev_y = 0.0
+
+        self.noise_profile = np.ones(frame_size // 2 + 1, dtype=np.float32) * 1e-4
+        self.gain_envelope = 1.0
+        self.alpha_noise = 0.05
+        self.attack_coef = 0.4
+        self.release_coef = 0.05
+
+    def process(self, pcm_int16: np.ndarray, is_speaking: bool) -> np.ndarray:
+        x = pcm_int16.astype(np.float32) / 32768.0
+
+        # 1. High-pass rumble filter
+        if self.has_scipy:
+            from scipy.signal import lfilter
+            x_filtered, self.zi = lfilter(self.b, self.a, x, zi=self.zi)
+        else:
+            dt = 1.0 / self.sample_rate
+            rc = 1.0 / (2.0 * np.pi * 80.0)
+            alpha = rc / (rc + dt)
+            x_filtered = np.zeros_like(x)
+            for i in range(len(x)):
+                y = alpha * (self.prev_y + x[i] - self.prev_x)
+                self.prev_x = x[i]
+                self.prev_y = y
+                x_filtered[i] = y
+
+        # 2. FFT Spectral Gating
+        spectrum = np.fft.rfft(x_filtered)
+        mag = np.abs(spectrum)
+
+        frame_energy = float(np.mean(mag))
+        if not is_speaking or frame_energy < 0.003:
+            self.noise_profile = (1.0 - self.alpha_noise) * self.noise_profile + self.alpha_noise * mag
+
+        snr = mag / (self.noise_profile + 1e-6)
+        spectral_gain = np.clip(1.0 - (1.5 / (snr + 0.1)), 0.08, 1.0)
+        cleaned_spectrum = spectrum * spectral_gain
+        cleaned_time = np.fft.irfft(cleaned_spectrum, n=len(x))
+
+        # 3. Dynamic envelope gate (smooth hysteresis between speaking and silence)
+        target_gain = 1.0 if is_speaking else 0.02
+        if target_gain > self.gain_envelope:
+            self.gain_envelope += self.attack_coef * (target_gain - self.gain_envelope)
+        else:
+            self.gain_envelope += self.release_coef * (target_gain - self.gain_envelope)
+
+        output = cleaned_time * self.gain_envelope
+        return np.clip(output * 32767.0, -32768.0, 32767.0).astype(np.int16)
+
+
 class AudioManager:
     def __init__(self):
         self.input_device: Optional[int] = None
@@ -47,12 +115,13 @@ class AudioManager:
         self.mic_volume: float = 1.0
         self.loopback_test: bool = False
 
-        # Advanced Audio Features
+        # Advanced Audio Features & DSP
         self.peer_volumes: Dict[str, float] = {}
         self.peer_muted: set = set()
         self.ptt_mode: bool = False
         self.ptt_active: bool = False
         self.noise_suppression: bool = True
+        self._noise_filter = RealtimeNoiseFilter(SAMPLE_RATE, SAMPLES_PER_FRAME)
         self._recording_voice_msg: bool = False
         self._voice_msg_frames: List[bytes] = []
         self._voice_msg_start_time: float = 0.0
@@ -245,22 +314,38 @@ class AudioManager:
             self._recording_voice_msg = True
 
     def stop_recording_voice_msg(self) -> Tuple[str, float]:
-        """Stops recording and returns (base64_pcm, duration_seconds)."""
+        """Stops recording, downsamples to 24kHz for lightweight fast transmission, and returns (base64_pcm, duration_seconds)."""
         import base64
         with self._lock:
             self._recording_voice_msg = False
             raw_pcm = b"".join(self._voice_msg_frames)
             duration = max(0.2, time.time() - self._voice_msg_start_time)
             self._voice_msg_frames = []
-            b64_str = base64.b64encode(raw_pcm).decode("ascii")
+            if not raw_pcm:
+                return "", 0.0
+            arr = np.frombuffer(raw_pcm, dtype=np.int16)
+            downsampled = arr[::2].tobytes()
+            b64_str = base64.b64encode(downsampled).decode("ascii")
             return b64_str, round(duration, 1)
 
-    def play_voice_msg(self, data_b64: str):
-        """Plays a received base64-encoded voice message."""
+    def play_voice_msg(self, data_b64: str, duration: float = 0.0):
+        """Plays a received base64-encoded voice message directly via sounddevice."""
         import base64
         try:
             raw_pcm = base64.b64decode(data_b64)
-            self.play_sound_effect(raw_pcm)
+            if not raw_pcm:
+                return
+            audio_arr = np.frombuffer(raw_pcm, dtype=np.int16)
+            if len(audio_arr) == 0:
+                return
+            rate = 24000
+            if duration > 0 and (len(audio_arr) / duration) > 36000:
+                rate = 48000
+            try:
+                sd.stop()
+            except Exception:
+                pass
+            sd.play(audio_arr, samplerate=rate, device=self.output_device)
         except Exception as e:
             logger.error(f"Error playing voice message: {e}")
 
@@ -294,8 +379,12 @@ class AudioManager:
 
         self.is_speaking = is_speaking
 
-        # Noise suppression: zero-out noise when not speaking
-        if self.noise_suppression and not is_speaking:
+        # Real-time Noise Suppression DSP (80Hz rumble filter + spectral gating + hysteresis)
+        if self.noise_suppression:
+            arr = np.frombuffer(raw_bytes, dtype=np.int16)
+            filtered_arr = self._noise_filter.process(arr, is_speaking)
+            raw_bytes = filtered_arr.tobytes()
+        elif not is_speaking:
             raw_bytes = b"\x00" * len(raw_bytes)
 
         if self.loopback_test and not self.is_muted:

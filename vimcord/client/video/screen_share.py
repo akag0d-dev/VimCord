@@ -91,12 +91,12 @@ class ScreenCapturer(QObject):
         scaled.save(buffer, "JPEG", self.quality)
         jpeg_data = byte_arr.data()
 
-        if not jpeg_data or len(jpeg_data) > 65000:
+        if not jpeg_data:
             return
 
         if self.on_frame_ready:
             self.on_frame_ready(self.target_type, self.target_id, jpeg_data)
-        elif self.send_func:
+        elif self.send_func and len(jpeg_data) <= 60000:
             self._seq = (self._seq + 1) % (2**32)
             pkt = pack_udp_audio(
                 pkt_type=UDP_TYPE_SCREEN_FRAME,

@@ -6,6 +6,7 @@ Voice Stage with animated VAD & Screen Sharing, and Account Settings.
 
 import logging
 import time
+import uuid
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
@@ -350,14 +351,16 @@ class MainWindow(QMainWindow):
         self.server_host = host
         self.server_udp_port = udp_port
 
+        self._load_local_profile()
+
         self.chat_view.set_current_user_id(user_id)
         self.chat_view.set_audio_manager(self.audio_manager)
         self.voice_view.set_current_user_id(user_id)
         self.member_list.set_current_user_id(user_id)
         self.ping_timer.start()
 
-        self.setWindowTitle(f"VimCord — {username}")
-        self.user_panel.set_user(username, user_id, self.my_avatar_color, self.my_status_text, self.my_avatar_image)
+        self.setWindowTitle(f"VimCord — {self.my_username}")
+        self.user_panel.set_user(self.my_username, user_id, self.my_avatar_color, self.my_status_text, self.my_avatar_image)
         self.channel_list.set_my_user_id(user_id)
 
         self.rooms = {r["room_id"]: r for r in rooms}
@@ -556,14 +559,31 @@ class MainWindow(QMainWindow):
     # ------------------ Text Chat ------------------
 
     def _on_send_chat_message(self, text: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
-        if self.current_text_channel_id:
-            self.tcp_client.send_chat_message("channel", self.current_text_channel_id,
-                                              content=text, image_data=image_data,
-                                              voice_data=voice_data, voice_duration=voice_duration)
-        elif self.current_dm_peer_id:
-            self.tcp_client.send_chat_message("dm", self.current_dm_peer_id,
-                                              content=text, image_data=image_data,
-                                              voice_data=voice_data, voice_duration=voice_duration)
+        target_type = "channel" if self.current_text_channel_id else "dm"
+        target_id = self.current_text_channel_id if self.current_text_channel_id else self.current_dm_peer_id
+        if not target_id:
+            return
+
+        self.tcp_client.send_chat_message(target_type, target_id,
+                                          content=text, image_data=image_data,
+                                          voice_data=voice_data, voice_duration=voice_duration)
+
+        # Optimistic local append for immediate visual feedback
+        local_msg = {
+            "msg_id": "loc-" + uuid.uuid4().hex[:8],
+            "target_type": target_type,
+            "target_id": target_id,
+            "sender_id": self.my_user_id,
+            "sender_name": self.my_username,
+            "avatar_color": self.my_avatar_color,
+            "avatar_image": getattr(self, "my_avatar_image", ""),
+            "content": text,
+            "image_data": image_data,
+            "voice_data": voice_data,
+            "voice_duration": voice_duration,
+            "timestamp": time.time()
+        }
+        self.chat_view.append_message(local_msg)
 
     def _on_delete_chat_message(self, msg_id: str, target_type: str, target_id: str):
         self.tcp_client.send_delete_message(msg_id, target_type, target_id)
@@ -668,16 +688,17 @@ class MainWindow(QMainWindow):
         # 1. Guaranteed TCP delivery (immune to router/NAT packet size drops)
         self.tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
 
-        # 2. Fast UDP delivery (low-latency when network supports it)
-        self._screen_seq = (self._screen_seq + 1) % (2**32)
-        pkt = pack_udp_audio(
-            pkt_type=UDP_TYPE_SCREEN_FRAME,
-            seq=self._screen_seq,
-            sender_id=self.my_user_id,
-            target_id=target_id,
-            payload=jpeg_data
-        )
-        self.udp_voice.send_screen_packet(pkt)
+        # 2. Fast UDP delivery (low-latency when network supports it, max 60000 bytes)
+        if len(jpeg_data) <= 60000:
+            self._screen_seq = (self._screen_seq + 1) % (2**32)
+            pkt = pack_udp_audio(
+                pkt_type=UDP_TYPE_SCREEN_FRAME,
+                seq=self._screen_seq,
+                sender_id=self.my_user_id,
+                target_id=target_id,
+                payload=jpeg_data
+            )
+            self.udp_voice.send_screen_packet(pkt)
 
     def _on_local_screen_frame(self, jpeg_data: bytes):
         pixmap = QPixmap()
@@ -688,8 +709,8 @@ class MainWindow(QMainWindow):
 
     def _on_screen_frame_received(self, sender_id: str, jpeg_data: bytes):
         now = time.time()
-        # Throttle rendering to max 25 FPS to prevent redundant work if both TCP and UDP arrive
-        if now - self._last_screen_render < 0.04:
+        # Smooth rendering up to 60 FPS (0.015s throttle)
+        if now - self._last_screen_render < 0.015:
             return
         self._last_screen_render = now
 
@@ -814,6 +835,50 @@ class MainWindow(QMainWindow):
         if self.current_room_id and self.current_room_id in self.rooms:
             self.channel_list.show_room_mode(self.rooms[self.current_room_id])
 
+    def _save_local_profile(self):
+        try:
+            import json
+            cfg_path = Path.home() / ".vimcord_profile.json"
+            data = {}
+            if cfg_path.exists():
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            key = self.my_user_id or self.my_username
+            data[key] = {
+                "username": self.my_username,
+                "bio": getattr(self, "my_bio", ""),
+                "status_text": self.my_status_text,
+                "avatar_color": self.my_avatar_color,
+                "avatar_image": getattr(self, "my_avatar_image", "")
+            }
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _load_local_profile(self):
+        try:
+            import json
+            cfg_path = Path.home() / ".vimcord_profile.json"
+            if not cfg_path.exists():
+                return
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            key = self.my_user_id or self.my_username
+            if key in data:
+                cached = data[key]
+                if not getattr(self, "my_bio", "") and cached.get("bio"):
+                    self.my_bio = cached["bio"]
+                if not getattr(self, "my_avatar_image", "") and cached.get("avatar_image"):
+                    self.my_avatar_image = cached["avatar_image"]
+                if cached.get("status_text") and not self.my_status_text:
+                    self.my_status_text = cached["status_text"]
+        except Exception:
+            pass
+
     def _on_settings_clicked(self):
         user_data = {
             "user_id": self.my_user_id,
@@ -824,7 +889,19 @@ class MainWindow(QMainWindow):
             "status_text": self.my_status_text
         }
         dlg = SettingsDialog(self.audio_manager, user_data, self)
-        dlg.profile_updated.connect(lambda u, s, c, img, b: self.tcp_client.send_update_profile(u, s, c, img, b))
+
+        def _handle_profile_update(u, s, c, img, b):
+            self.my_username = u
+            self.my_status_text = s
+            self.my_avatar_color = c
+            self.my_avatar_image = img
+            self.my_bio = b
+            self.user_panel.set_user(u, self.my_user_id, c, s, img)
+            self.setWindowTitle(f"VimCord — {u}")
+            self.tcp_client.send_update_profile(u, s, c, img, b)
+            self._save_local_profile()
+
+        dlg.profile_updated.connect(_handle_profile_update)
         dlg.password_changed.connect(lambda op, np: self.tcp_client.send_change_password(op, np))
         dlg.screen_settings_changed.connect(lambda res, fps, q: self.screen_capturer.set_stream_settings(res, fps, q))
         dlg.ptt_settings_changed.connect(self._on_ptt_settings_changed)

@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPixmap, QCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QFrame, QMenu, QSlider
+    QFrame, QMenu, QSlider, QWidgetAction
 )
 
 
@@ -298,15 +298,62 @@ class MemberListWidget(QWidget):
             mute_action = menu.addAction(mute_text)
             mute_action.triggered.connect(lambda: self._toggle_peer_mute(user_id))
 
-            # Submenu for Volume
-            vol_menu = menu.addMenu("🎚️ Громкость пользователя")
-            current_vol = self.peer_volumes.get(user_id, 1.0)
-            
-            for pct in [50, 100, 150, 200]:
-                check = " ✓" if abs(current_vol - (pct / 100.0)) < 0.05 else ""
-                act = vol_menu.addAction(f"{pct}%{check}")
-                val = pct / 100.0
-                act.triggered.connect(lambda checked=False, u=user_id, v=val: self._set_peer_volume(u, v))
+            menu.addSeparator()
+
+            # Slider action for continuous volume (0% to 200%)
+            vol_action = QWidgetAction(menu)
+            slider_box = QWidget()
+            slider_box.setStyleSheet("background: transparent; padding: 4px 8px;")
+            s_layout = QVBoxLayout(slider_box)
+            s_layout.setContentsMargins(6, 4, 6, 6)
+            s_layout.setSpacing(4)
+
+            current_pct = int(round(self.peer_volumes.get(user_id, 1.0) * 100))
+
+            header_box = QHBoxLayout()
+            vol_title = QLabel("ГРОМКОСТЬ ПОЛЬЗОВАТЕЛЯ")
+            vol_title.setStyleSheet("color: #949ba4; font-size: 10px; font-weight: bold; border: none;")
+            vol_val_lbl = QLabel(f"{current_pct}%")
+            vol_val_lbl.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold; border: none;")
+            header_box.addWidget(vol_title)
+            header_box.addStretch()
+            header_box.addWidget(vol_val_lbl)
+            s_layout.addLayout(header_box)
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, 200)
+            slider.setValue(current_pct)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    height: 6px;
+                    background: #35373c;
+                    border-radius: 3px;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #5865F2;
+                    border-radius: 3px;
+                }
+                QSlider::handle:horizontal {
+                    background: #ffffff;
+                    border: none;
+                    width: 14px;
+                    height: 14px;
+                    margin: -4px 0;
+                    border-radius: 7px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #e0e0e0;
+                }
+            """)
+            def _on_vol_slide(val, uid=user_id, lbl=vol_val_lbl):
+                lbl.setText(f"{val}%")
+                self._set_peer_volume(uid, val / 100.0)
+
+            slider.valueChanged.connect(_on_vol_slide)
+            s_layout.addWidget(slider)
+
+            vol_action.setDefaultWidget(slider_box)
+            menu.addAction(vol_action)
 
         menu.exec(pos)
 

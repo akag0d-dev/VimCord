@@ -45,6 +45,29 @@ class TCPServer:
             except Exception as e:
                 logger.debug(f"Failed to send to {user_id}: {e}")
 
+    def get_channel_room_id(self, channel_id: str) -> Optional[str]:
+        for r_id, r in self.server_state.rooms.items():
+            if channel_id in r.channels:
+                return r_id
+        return None
+
+    async def send_to_channel_room(self, channel_id: str, message: Dict[str, Any]):
+        room_id = self.get_channel_room_id(channel_id)
+        if not room_id or room_id == "room-default":
+            await self.broadcast(message)
+            return
+        members = self.db.get_room_members(room_id)
+        for m in members:
+            await self.send_to_user(m["user_id"], message)
+
+    async def send_to_room_members(self, room_id: str, message: Dict[str, Any]):
+        if not room_id or room_id == "room-default":
+            await self.broadcast(message)
+            return
+        members = self.db.get_room_members(room_id)
+        for m in members:
+            await self.send_to_user(m["user_id"], message)
+
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         current_user: Optional[User] = None
         addr = writer.get_extra_info("peername")
@@ -206,7 +229,7 @@ class TCPServer:
                             "timestamp": now
                         }
                         if t_type == "channel":
-                            await self.broadcast(chat_msg)
+                            await self.send_to_channel_room(t_id, chat_msg)
                         elif t_type == "dm":
                             # Deliver to target recipient and echo to sender
                             await self.send_to_user(t_id, chat_msg)
@@ -225,7 +248,7 @@ class TCPServer:
                             "target_id": target_id
                         }
                         if target_type == "channel":
-                            await self.broadcast(del_event)
+                            await self.send_to_channel_room(target_id, del_event)
                         elif target_type == "dm":
                             await self.send_to_user(target_id, del_event)
                             await self.send_to_user(current_user.user_id, del_event)
@@ -294,7 +317,7 @@ class TCPServer:
                 elif msg_type == "delete_room":
                     room_id = msg.get("room_id")
                     if room_id and self.server_state.delete_room(room_id):
-                        await self.broadcast({
+                        await self.send_to_room_members(room_id, {
                             "type": "room_deleted",
                             "room_id": room_id
                         })
@@ -306,7 +329,7 @@ class TCPServer:
                     ch_type = msg.get("channel_type", "text")
                     channel = self.server_state.create_channel(room_id, name, ch_type)
                     if channel:
-                        await self.broadcast({
+                        await self.send_to_room_members(room_id, {
                             "type": "channel_created",
                             "room_id": room_id,
                             "channel": channel.to_dict()
@@ -317,7 +340,7 @@ class TCPServer:
                     room_id = msg.get("room_id")
                     channel_id = msg.get("channel_id")
                     if self.server_state.delete_channel(room_id, channel_id):
-                        await self.broadcast({
+                        await self.send_to_room_members(room_id, {
                             "type": "channel_deleted",
                             "room_id": room_id,
                             "channel_id": channel_id

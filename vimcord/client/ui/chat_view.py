@@ -8,11 +8,12 @@ import datetime
 import os
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QByteArray, QBuffer, QIODevice, QUrl
-from PyQt6.QtGui import QDesktopServices, QPixmap, QIcon
+from PyQt6.QtGui import QDesktopServices, QPixmap, QIcon, QTextDocument, QImage
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextBrowser, QFileDialog, QFrame
 )
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
 
 class ChatView(QWidget):
@@ -101,6 +102,7 @@ class ChatView(QWidget):
         # 2. Messages Browser
         self.browser = QTextBrowser()
         self.browser.setObjectName("chat_history")
+        self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
         self.browser.anchorClicked.connect(self._on_anchor_clicked)
         self.browser.setStyleSheet("""
@@ -261,9 +263,25 @@ class ChatView(QWidget):
         if t_id not in self.message_cache:
             self.message_cache[t_id] = []
         
-        msg_id = msg.get("msg_id")
-        if not any(m.get("msg_id") == msg_id for m in self.message_cache[t_id]):
-            self.message_cache[t_id].append(msg)
+        msg_id = msg.get("msg_id", "")
+        # Check if already cached by ID
+        if any(m.get("msg_id") == msg_id for m in self.message_cache[t_id]):
+            return
+
+        # Check for optimistic local message match (same sender and content within 5s)
+        matched_local = None
+        for m in self.message_cache[t_id]:
+            if m.get("msg_id", "").startswith("loc-") and m.get("sender_id") == msg.get("sender_id"):
+                if m.get("content") == msg.get("content") and m.get("image_data") == msg.get("image_data"):
+                    matched_local = m
+                    break
+        
+        if matched_local:
+            # Update local placeholder with real server msg_id
+            matched_local["msg_id"] = msg_id
+            return
+
+        self.message_cache[t_id].append(msg)
 
         if t_id == self.current_target_id:
             self._append_message_html(msg)
@@ -305,7 +323,7 @@ class ChatView(QWidget):
         avatar_image = msg.get("avatar_image", "")
         image_data = msg.get("image_data", "")
         voice_data = msg.get("voice_data", "")
-        voice_duration = msg.get("voice_duration", 0.0)
+        voice_duration = float(msg.get("voice_duration", 0.0))
 
         time_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
         content_escaped = (
@@ -315,43 +333,52 @@ class ChatView(QWidget):
             .replace("\n", "<br/>")
         )
 
-        initials = sender[:2].upper() if sender else "U"
+        # 1. Round Avatar registered as Qt Document Image Resource
+        av_pixmap = get_round_avatar_pixmap(36, sender, avatar_color, avatar_image)
+        av_key = f"av_{abs(hash(sender + avatar_color + avatar_image[:20]))}"
+        av_url = QUrl(f"res://avatar/{av_key}.png")
+        self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, av_url, av_pixmap.toImage())
+        avatar_html = f"<img src='res://avatar/{av_key}.png' width='36' height='36' />"
 
-        # Avatar rendering
-        if avatar_image:
-            avatar_html = f"<img src='data:image/jpeg;base64,{avatar_image}' width='36' height='36' style='border-radius: 18px; object-fit: cover;'/>"
-        else:
-            avatar_html = f"""
-            <div style='width: 36px; height: 36px; background-color: {avatar_color}; color: #ffffff;
-                        font-weight: bold; font-size: 14px; line-height: 36px; text-align: center;
-                        border-radius: 18px;'>
-                {initials}
-            </div>
-            """
-
-        # Delete button for own messages
+        # 2. Delete button for own messages
         delete_html = ""
-        if sender_id and self.current_user_id and sender_id == self.current_user_id:
+        if sender_id and self.current_user_id and sender_id == self.current_user_id and msg_id:
             delete_html = f"""
             <a href='delete:{msg_id}' style='color: #ed4245; text-decoration: none; font-size: 12px; margin-left: 10px;' title='Удалить сообщение'>🗑️</a>
             """
 
-        # Attachment Image
+        # 3. Attachment Image registered as Qt Document Image Resource
         image_html = ""
         if image_data:
-            image_html = f"""
-            <div style='margin-top: 8px;'>
-                <img src='data:image/jpeg;base64,{image_data}' style='max-width: 380px; max-height: 280px; border-radius: 8px; border: 1px solid #232428;'/>
-            </div>
-            """
+            try:
+                clean_b64 = image_data
+                if "," in clean_b64:
+                    clean_b64 = clean_b64.split(",", 1)[1]
+                raw_bytes = base64.b64decode(clean_b64)
+                qimg = QImage()
+                if qimg.loadFromData(raw_bytes):
+                    max_w, max_h = 380, 260
+                    if qimg.width() > max_w or qimg.height() > max_h:
+                        qimg = qimg.scaled(max_w, max_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    img_key = f"img_{msg_id or abs(hash(image_data[:30]))}"
+                    img_url = QUrl(f"res://img/{img_key}.jpg")
+                    self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, img_url, qimg)
+                    image_html = f"""
+                    <div style='margin-top: 6px;'>
+                        <img src='res://img/{img_key}.jpg' width='{qimg.width()}' height='{qimg.height()}' />
+                    </div>
+                    """
+            except Exception:
+                pass
 
-        # Voice message card
+        # 4. Voice message card
         voice_html = ""
         if voice_data:
+            dur_text = f"{voice_duration:.1f}с" if voice_duration > 0 else "голосовое"
             voice_html = f"""
-            <div style='margin-top: 8px; display: inline-block; background-color: #2b2d31; border: 1px solid #383a40; border-radius: 8px; padding: 6px 14px;'>
+            <div style='margin-top: 6px; padding: 4px 0;'>
                 <a href='play_voice:{msg_id}' style='color: #5865F2; text-decoration: none; font-weight: bold; font-size: 13px;'>
-                    ▶️ Прослушать ({voice_duration}с)
+                    ▶️ Прослушать ({dur_text})
                 </a>
             </div>
             """
@@ -393,8 +420,9 @@ class ChatView(QWidget):
             msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
             if msg and msg.get("voice_data"):
                 if self.audio_manager:
-                    self.audio_manager.play_voice_msg(msg["voice_data"])
-                self.play_voice_requested.emit(msg["voice_data"])
+                    self.audio_manager.play_voice_msg(msg["voice_data"], float(msg.get("voice_duration", 0.0)))
+                else:
+                    self.play_voice_requested.emit(msg["voice_data"])
         else:
             QDesktopServices.openUrl(url)
 
