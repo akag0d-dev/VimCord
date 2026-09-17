@@ -189,5 +189,96 @@ class TestAudioHangover(unittest.TestCase):
         self.assertEqual(mgr.hangover_counter, 0)
 
 
+class TestTCPScreenSharing(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        db_path = os.path.join(self.tmp_dir.name, "test_screen.db")
+        self.db = Database(db_path)
+        self.state = ServerState(self.db)
+        self.tcp_server = TCPServer(self.state, "127.0.0.1", 29991)
+        self.tcp_srv = await asyncio.start_server(
+            self.tcp_server.handle_client,
+            "127.0.0.1",
+            29991
+        )
+
+    async def asyncTearDown(self):
+        self.tcp_srv.close()
+        await self.tcp_srv.wait_closed()
+        self.tmp_dir.cleanup()
+
+    async def _read_json(self, reader):
+        line = await asyncio.wait_for(reader.readline(), timeout=3.0)
+        return decode_json_message(line.decode("utf-8").strip())
+
+    async def test_screen_frame_and_stop_broadcast_to_voice_channel(self):
+        # 1. Login Client A
+        r_a, w_a = await asyncio.open_connection("127.0.0.1", 29991)
+        w_a.write(encode_json_message({"type": "login", "username": "StreamerA"}))
+        await w_a.drain()
+        resp_a = await self._read_json(r_a)
+        self.assertTrue(resp_a["success"])
+        room_id = resp_a["rooms"][0]["room_id"]
+        vch_id = [c["channel_id"] for c in resp_a["rooms"][0]["channels"] if c["channel_type"] == "voice"][0]
+
+        # 2. Login Client B
+        r_b, w_b = await asyncio.open_connection("127.0.0.1", 29991)
+        w_b.write(encode_json_message({"type": "login", "username": "ViewerB"}))
+        await w_b.drain()
+        resp_b = await self._read_json(r_b)
+        self.assertTrue(resp_b["success"])
+
+        # 3. Both join the voice channel
+        w_a.write(encode_json_message({"type": "join_voice", "room_id": room_id, "channel_id": vch_id}))
+        await w_a.drain()
+        _ = await self._read_json(r_a)
+
+        w_b.write(encode_json_message({"type": "join_voice", "room_id": room_id, "channel_id": vch_id}))
+        await w_b.drain()
+        _ = await self._read_json(r_b)
+
+        # Flush any presence or voice updates
+        await asyncio.sleep(0.05)
+        while True:
+            try:
+                line = await asyncio.wait_for(r_b.readline(), timeout=0.1)
+            except asyncio.TimeoutError:
+                break
+
+        # 4. Streamer A sends screen frame
+        fake_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        w_a.write(encode_json_message({
+            "type": "screen_frame",
+            "target_type": "channel",
+            "target_id": vch_id,
+            "data": fake_b64
+        }))
+        await w_a.drain()
+
+        # Viewer B should receive the screen frame!
+        frame_msg = await self._read_json(r_b)
+        self.assertEqual(frame_msg["type"], "screen_frame")
+        self.assertEqual(frame_msg["target_id"], vch_id)
+        self.assertEqual(frame_msg["data"], fake_b64)
+
+        # 5. Streamer A sends screen stop
+        w_a.write(encode_json_message({
+            "type": "screen_stop",
+            "target_type": "channel",
+            "target_id": vch_id
+        }))
+        await w_a.drain()
+
+        # Viewer B should receive screen_stop!
+        stop_msg = await self._read_json(r_b)
+        self.assertEqual(stop_msg["type"], "screen_stop")
+        self.assertEqual(stop_msg["target_id"], vch_id)
+
+        w_a.close()
+        w_b.close()
+        await w_a.wait_closed()
+        await w_b.wait_closed()
+
+
 if __name__ == "__main__":
     unittest.main()

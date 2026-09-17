@@ -5,6 +5,7 @@ Voice Stage with animated VAD & Screen Sharing, and Account Settings.
 """
 
 import logging
+import time
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
@@ -12,6 +13,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QInputDialog, QMessageBox, QStackedWidget, QApplication
 )
+
+from vimcord.common.protocol import pack_udp_audio, UDP_TYPE_SCREEN_FRAME
 
 from vimcord.client.audio.audio_manager import AudioManager
 from vimcord.client.network.tcp_client import TCPClient
@@ -40,9 +43,12 @@ class MainWindow(QMainWindow):
         self.audio_manager = audio_manager
         self.udp_voice = udp_voice
 
-        # Screen capturer
+        # Screen capturer with dual reliable TCP + fast UDP transmission
         self.screen_capturer = ScreenCapturer(send_func=self.udp_voice.send_screen_packet)
+        self.screen_capturer.on_frame_ready = self._send_screen_frame
         self.screen_share_window = ScreenShareWindow()
+        self._last_screen_render = 0.0
+        self._screen_seq = 0
 
         # User profile state
         self.my_user_id = ""
@@ -222,9 +228,13 @@ class MainWindow(QMainWindow):
         self.tcp_client.signals.call_ended.connect(self._on_call_ended)
         self.tcp_client.signals.call_failed.connect(self._on_call_failed)
 
-        # UDP Audio & Screen
-        self.udp_voice.signals.peer_speaking.connect(self._on_peer_speaking)
+        # Screen Sharing (TCP reliable + UDP low-latency)
+        self.tcp_client.signals.screen_frame.connect(self._on_screen_frame_received)
+        self.tcp_client.signals.screen_stop.connect(self._on_screen_stop_received)
         self.udp_voice.signals.screen_frame_received.connect(self._on_screen_frame_received)
+
+        # UDP Audio
+        self.udp_voice.signals.peer_speaking.connect(self._on_peer_speaking)
 
     def initialize_session(self, user_id: str, username: str, avatar_color: str, status_text: str,
                            rooms: List[Dict], users: List[Dict], friends: List[Dict], host: str, udp_port: int, avatar_image: str = ""):
@@ -490,6 +500,7 @@ class MainWindow(QMainWindow):
 
     def _on_screen_share_toggled(self, is_sharing: Optional[bool] = None):
         target = self.active_call_id or self.current_voice_channel_id
+        target_type = "call" if self.active_call_id else "channel"
         if not target:
             QMessageBox.information(self, "Демонстрация экрана", "Подключитесь к голосовому каналу или звонку, чтобы включить демонстрацию экрана.")
             return
@@ -500,16 +511,32 @@ class MainWindow(QMainWindow):
             new_sharing = is_sharing
 
         if new_sharing:
-            self.screen_capturer.start_sharing(self.my_user_id, target)
+            self.screen_capturer.start_sharing(self.my_user_id, target, target_type)
             self.voice_bar.set_screen_sharing(True)
             self.voice_view.screen_btn.setText("🔴 Остановить экран")
             self.screen_share_window.set_streamer(self.my_username, is_local=True)
             self.screen_share_window.show()
         else:
             self.screen_capturer.stop_sharing()
+            self.tcp_client.send_screen_stop(target_type, target)
             self.voice_bar.set_screen_sharing(False)
             self.voice_view.screen_btn.setText("🖥️ Экран")
             self.screen_share_window.hide()
+
+    def _send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
+        # 1. Guaranteed TCP delivery (immune to router/NAT packet size drops)
+        self.tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
+
+        # 2. Fast UDP delivery (low-latency when network supports it)
+        self._screen_seq = (self._screen_seq + 1) % (2**32)
+        pkt = pack_udp_audio(
+            pkt_type=UDP_TYPE_SCREEN_FRAME,
+            seq=self._screen_seq,
+            sender_id=self.my_user_id,
+            target_id=target_id,
+            payload=jpeg_data
+        )
+        self.udp_voice.send_screen_packet(pkt)
 
     def _on_local_screen_frame(self, jpeg_data: bytes):
         pixmap = QPixmap()
@@ -519,6 +546,12 @@ class MainWindow(QMainWindow):
             self.voice_view.display_screen_frame(self.my_username, jpeg_data)
 
     def _on_screen_frame_received(self, sender_id: str, jpeg_data: bytes):
+        now = time.time()
+        # Throttle rendering to max 25 FPS to prevent redundant work if both TCP and UDP arrive
+        if now - self._last_screen_render < 0.04:
+            return
+        self._last_screen_render = now
+
         sender_name = sender_id
         if sender_id in self.users:
             sender_name = self.users[sender_id].get("username", sender_id)
@@ -529,6 +562,11 @@ class MainWindow(QMainWindow):
             if not self.screen_share_window.isVisible():
                 self.screen_share_window.show()
         self.voice_view.display_screen_frame(sender_name, jpeg_data)
+
+    def _on_screen_stop_received(self, sender_id: str):
+        if not self.screen_capturer.is_sharing:
+            self.screen_share_window.hide()
+            self.voice_view.hide_screen_share()
 
     # ------------------ Direct Calls (1-on-1) ------------------
 

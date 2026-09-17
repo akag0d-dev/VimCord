@@ -481,6 +481,62 @@ class TCPServer:
                         await self.send_to_user(peer_id, end_notify)
                         await self.send_to_user(current_user.user_id, end_notify)
 
+                # 14. SCREEN SHARING (Reliable TCP Forwarding)
+                elif msg_type == "screen_frame":
+                    target_type = msg.get("target_type")
+                    target_id = msg.get("target_id")
+                    b64_data = msg.get("data", "")
+                    if target_type == "channel":
+                        for room in self.server_state.rooms.values():
+                            if target_id in room.channels:
+                                ch = room.channels[target_id]
+                                for uid in ch.voice_users:
+                                    if uid != current_user.user_id:
+                                        await self.send_to_user(uid, {
+                                            "type": "screen_frame",
+                                            "sender_id": current_user.user_id,
+                                            "sender_name": current_user.username,
+                                            "target_id": target_id,
+                                            "data": b64_data
+                                        })
+                                break
+                    elif target_type == "call":
+                        session = self.server_state.calls.get(target_id)
+                        if session and session.state == "active":
+                            peer_id = session.callee_id if current_user.user_id == session.caller_id else session.caller_id
+                            await self.send_to_user(peer_id, {
+                                "type": "screen_frame",
+                                "sender_id": current_user.user_id,
+                                "sender_name": current_user.username,
+                                "target_id": target_id,
+                                "data": b64_data
+                            })
+
+                elif msg_type == "screen_stop":
+                    target_type = msg.get("target_type")
+                    target_id = msg.get("target_id")
+                    if target_type == "channel":
+                        for room in self.server_state.rooms.values():
+                            if target_id in room.channels:
+                                ch = room.channels[target_id]
+                                for uid in ch.voice_users:
+                                    if uid != current_user.user_id:
+                                        await self.send_to_user(uid, {
+                                            "type": "screen_stop",
+                                            "sender_id": current_user.user_id,
+                                            "target_id": target_id
+                                        })
+                                break
+                    elif target_type == "call":
+                        session = self.server_state.calls.get(target_id)
+                        if session and session.state == "active":
+                            peer_id = session.callee_id if current_user.user_id == session.caller_id else session.caller_id
+                            await self.send_to_user(peer_id, {
+                                "type": "screen_stop",
+                                "sender_id": current_user.user_id,
+                                "target_id": target_id
+                            })
+
         except (asyncio.CancelledError, ConnectionResetError):
             pass
         except Exception as e:

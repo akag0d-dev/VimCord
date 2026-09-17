@@ -86,13 +86,17 @@ class ScreenShareWindow(QWidget):
         self.last_pixmap = pixmap
         if not pixmap.isNull():
             target_size = self.video_label.size()
-            if target_size.width() > 10 and target_size.height() > 10:
-                scaled = pixmap.scaled(
-                    target_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.video_label.setPixmap(scaled)
+            if target_size.width() <= 10 or target_size.height() <= 10:
+                target_size = self.size()
+            if target_size.width() <= 10 or target_size.height() <= 10:
+                target_size = self.sizeHint()
+
+            scaled = pixmap.scaled(
+                target_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.video_label.setPixmap(scaled)
 
     def resizeEvent(self, event: QResizeEvent):
         super().resizeEvent(event)

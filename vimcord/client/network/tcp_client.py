@@ -3,6 +3,7 @@ TCP Control Client for VimCord.
 Runs network communication in a background thread and dispatches events via PyQt signals.
 """
 
+import base64
 import json
 import logging
 import socket
@@ -55,6 +56,10 @@ class TCPClientSignals(QObject):
     call_declined = pyqtSignal(str)               # call_id
     call_ended = pyqtSignal(str)                  # call_id
     call_failed = pyqtSignal(str)                 # reason
+
+    # Screen sharing
+    screen_frame = pyqtSignal(str, bytes)         # sender_id, raw_jpeg_bytes
+    screen_stop = pyqtSignal(str)                 # sender_id
 
 
 class TCPClient:
@@ -203,11 +208,27 @@ class TCPClient:
     def send_call_end(self, call_id: str):
         self.send_message({"type": "call_end", "call_id": call_id})
 
+    def send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
+        b64 = base64.b64encode(jpeg_data).decode("ascii")
+        self.send_message({
+            "type": "screen_frame",
+            "target_type": target_type,
+            "target_id": target_id,
+            "data": b64
+        })
+
+    def send_screen_stop(self, target_type: str, target_id: str):
+        self.send_message({
+            "type": "screen_stop",
+            "target_type": target_type,
+            "target_id": target_id
+        })
+
     def _receive_loop(self):
         buffer = ""
         while self._is_running and self.sock:
             try:
-                data = self.sock.recv(4096)
+                data = self.sock.recv(65536)
                 if not data:
                     break
                 buffer += data.decode("utf-8", errors="ignore")
@@ -325,3 +346,18 @@ class TCPClient:
 
         elif mtype == "call_failed":
             self.signals.call_failed.emit(msg.get("reason", "Ошибка вызова"))
+
+        elif mtype == "screen_frame":
+            sender_id = msg.get("sender_id", "")
+            b64_data = msg.get("data", "")
+            if sender_id and b64_data:
+                try:
+                    raw_jpeg = base64.b64decode(b64_data)
+                    self.signals.screen_frame.emit(sender_id, raw_jpeg)
+                except Exception:
+                    pass
+
+        elif mtype == "screen_stop":
+            sender_id = msg.get("sender_id", "")
+            if sender_id:
+                self.signals.screen_stop.emit(sender_id)

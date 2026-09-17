@@ -183,6 +183,8 @@ class UDPVoiceClient:
             except Exception as e:
                 if self._is_running:
                     logger.debug(f"UDP recv error: {e}")
+                    time.sleep(0.01)
+                    continue
                 break
 
     def _ping_loop(self):
