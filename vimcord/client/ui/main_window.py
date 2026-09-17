@@ -7,6 +7,7 @@ Voice Stage with animated VAD & Screen Sharing, and Account Settings.
 import logging
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QInputDialog, QMessageBox, QStackedWidget, QApplication
@@ -372,7 +373,7 @@ class MainWindow(QMainWindow):
         self.main_stack.setCurrentIndex(2)
 
     def _on_voice_bar_channel_clicked(self):
-        if self.current_voice_channel_id:
+        if self.current_voice_channel_id or self.active_call_id:
             self.main_stack.setCurrentIndex(2)
 
     def _on_disconnect_voice(self):
@@ -380,6 +381,9 @@ class MainWindow(QMainWindow):
             self.screen_capturer.stop_sharing()
             self.voice_bar.set_screen_sharing(False)
             self.screen_share_window.hide()
+
+        if self.active_call_id:
+            self._on_end_active_call()
 
         if self.current_voice_channel_id:
             self.tcp_client.send_leave_voice()
@@ -554,6 +558,8 @@ class MainWindow(QMainWindow):
         self.udp_voice.active_call_id = call_id
 
         self.call_banner.start(peer_name)
+        self.voice_bar.set_channel("Личный звонок", peer_name)
+        self.voice_bar.show()
         self.main_stack.setCurrentIndex(1)
 
         peer_color = "#5865F2"
@@ -565,7 +571,6 @@ class MainWindow(QMainWindow):
             {"user_id": self.my_user_id, "username": self.my_username, "avatar_color": self.my_avatar_color},
             {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
         ])
-        self.voice_view.show()
 
     def _on_call_declined(self, call_id: str):
         self.audio_manager.stop_ringtone()
@@ -579,9 +584,11 @@ class MainWindow(QMainWindow):
             self.active_call_id = None
             self.udp_voice.active_call_id = None
             self.call_banner.stop()
+            self.voice_bar.hide()
             self.voice_view.hide_screen_share()
-            self.voice_view.hide()
             self.audio_manager.clear_peers()
+            if self.main_stack.currentIndex() == 2:
+                self.main_stack.setCurrentIndex(1)
 
     def _on_call_failed(self, reason: str):
         self.audio_manager.stop_ringtone()
@@ -595,9 +602,11 @@ class MainWindow(QMainWindow):
             self.active_call_id = None
             self.udp_voice.active_call_id = None
             self.call_banner.stop()
+            self.voice_bar.hide()
             self.voice_view.hide_screen_share()
-            self.voice_view.hide()
             self.audio_manager.clear_peers()
+            if self.main_stack.currentIndex() == 2:
+                self.main_stack.setCurrentIndex(1)
 
     # ------------------ Audio & Indicators ------------------
 

@@ -2,7 +2,7 @@
 Dedicated Screen Share Window for VimCord.
 Floating, resizable window supporting fullscreen (F11), smooth video scaling, and floating controls.
 """
-
+from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QPixmap, QKeyEvent, QResizeEvent
 from PyQt6.QtWidgets import (
