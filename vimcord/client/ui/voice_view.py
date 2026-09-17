@@ -4,7 +4,7 @@ Displays participant avatars with real-time green glowing speaking indicators,
 and supports live Screen Sharing (video stream view and screen share toggle).
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import Qt, pyqtSignal, QByteArray
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import (
