@@ -125,6 +125,18 @@ class Database:
                 cur.execute("ALTER TABLE messages ADD COLUMN voice_duration REAL DEFAULT 0.0")
             except Exception:
                 pass
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN file_data TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN file_name TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN file_size INTEGER DEFAULT 0")
+            except Exception:
+                pass
             cur.execute("CREATE INDEX IF NOT EXISTS idx_msg_target ON messages(target_id, timestamp)")
 
             # 7. Friendships table
@@ -339,15 +351,15 @@ class Database:
         """Computes a canonical target_id for 1-on-1 private messaging."""
         return f"dm:{min(uid1, uid2)}:{max(uid1, uid2)}"
 
-    def save_message(self, msg_id: str, target_type: str, target_id: str, sender_id: str, sender_name: str, content: str, timestamp: float, image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
+    def save_message(self, msg_id: str, target_type: str, target_id: str, sender_id: str, sender_name: str, content: str, timestamp: float, image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0):
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT OR REPLACE INTO messages (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO messages (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration, file_data, file_name, file_size)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration)
+                (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration, file_data, file_name, file_size)
             )
             conn.commit()
 
@@ -368,6 +380,9 @@ class Database:
                        COALESCE(m.image_data, '') as image_data,
                        COALESCE(m.voice_data, '') as voice_data,
                        COALESCE(m.voice_duration, 0.0) as voice_duration,
+                       COALESCE(m.file_data, '') as file_data,
+                       COALESCE(m.file_name, '') as file_name,
+                       COALESCE(m.file_size, 0) as file_size,
                        COALESCE(u.avatar_color, '#5865F2') as avatar_color,
                        COALESCE(u.avatar_image, '') as avatar_image
                 FROM messages m

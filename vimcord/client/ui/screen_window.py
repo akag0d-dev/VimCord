@@ -15,12 +15,12 @@ class ScreenShareWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle("VimCord - Демонстрация экрана")
+        self.setWindowTitle("VimCord - Screen Share")
         self.resize(960, 540)
         self.setMinimumSize(480, 270)
         self.setStyleSheet("background-color: #1e1f22;")
 
-        self.streamer_name = "Пользователь"
+        self.streamer_name = "User"
         self.is_local = False
         self.last_pixmap: Optional[QPixmap] = None
 
@@ -39,11 +39,11 @@ class ScreenShareWindow(QWidget):
         bar_layout.setContentsMargins(14, 0, 14, 0)
         bar_layout.setSpacing(10)
 
-        self.title_lbl = QLabel("🖥️ Демонстрация экрана")
+        self.title_lbl = QLabel("🖥️ Screen Share")
         self.title_lbl.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 13px;")
         bar_layout.addWidget(self.title_lbl, 1)
 
-        self.fullscreen_btn = QPushButton("⛶ Полный экран (F11)")
+        self.fullscreen_btn = QPushButton("⛶ Fullscreen (F11)")
         self.fullscreen_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2b2d31; color: #dbdee1; border: none;
@@ -54,7 +54,7 @@ class ScreenShareWindow(QWidget):
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         bar_layout.addWidget(self.fullscreen_btn)
 
-        self.close_btn = QPushButton("✕ Закрыть")
+        self.close_btn = QPushButton("✕ Close")
         self.close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f23f43; color: #ffffff; border: none;
@@ -72,15 +72,15 @@ class ScreenShareWindow(QWidget):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_label.setStyleSheet("background-color: #000000; color: #949ba4; font-size: 14px;")
-        self.video_label.setText("Ожидание видеопотока...")
+        self.video_label.setText("Waiting for video stream...")
         main_layout.addWidget(self.video_label, 1)
 
     def set_streamer(self, username: str, is_local: bool = False):
         self.streamer_name = username
         self.is_local = is_local
-        tag = " (Ваш экран)" if is_local else ""
-        self.title_lbl.setText(f"🖥️ Демонстрация экрана: {username}{tag}")
-        self.setWindowTitle(f"VimCord - Демонстрация экрана: {username}{tag}")
+        tag = " (Your Screen)" if is_local else ""
+        self.title_lbl.setText(f"🖥️ Screen Share: {username}{tag}")
+        self.setWindowTitle(f"VimCord - Screen Share: {username}{tag}")
 
     def update_frame(self, pixmap: QPixmap):
         self.last_pixmap = pixmap
@@ -106,10 +106,10 @@ class ScreenShareWindow(QWidget):
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.fullscreen_btn.setText("⛶ Полный экран (F11)")
+            self.fullscreen_btn.setText("⛶ Fullscreen (F11)")
         else:
             self.showFullScreen()
-            self.fullscreen_btn.setText("⛶ Оконный режим (F11)")
+            self.fullscreen_btn.setText("⛶ Windowed (F11)")
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_F11:

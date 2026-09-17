@@ -92,7 +92,7 @@ class TCPClient:
             return True
         except Exception as e:
             logger.error(f"Failed to connect to {host}:{port} -> {e}")
-            self.signals.error.emit(f"Не удалось подключиться к серверу: {e}")
+            self.signals.error.emit(f"Failed to connect to server: {e}")
             return False
 
     def disconnect(self):
@@ -213,7 +213,7 @@ class TCPClient:
     def send_leave_voice(self):
         self.send_message({"type": "leave_voice"})
 
-    def send_chat_message(self, target_type: str, target_id: str, content: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
+    def send_chat_message(self, target_type: str, target_id: str, content: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0):
         self.send_message({
             "type": "send_msg",
             "target_type": target_type,
@@ -221,7 +221,10 @@ class TCPClient:
             "content": content,
             "image_data": image_data,
             "voice_data": voice_data,
-            "voice_duration": voice_duration
+            "voice_duration": voice_duration,
+            "file_data": file_data,
+            "file_name": file_name,
+            "file_size": file_size
         })
 
     def send_call_start(self, target_user_id: str):
@@ -396,7 +399,7 @@ class TCPClient:
             self.signals.call_ended.emit(msg.get("call_id", ""))
 
         elif mtype == "call_failed":
-            self.signals.call_failed.emit(msg.get("reason", "Ошибка вызова"))
+            self.signals.call_failed.emit(msg.get("reason", "Call failed"))
 
         elif mtype == "screen_frame":
             sender_id = msg.get("sender_id", "")

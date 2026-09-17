@@ -22,7 +22,7 @@ class UserProfileModal(QDialog):
         self.is_self = is_self
         self.is_friend = is_friend
 
-        self.setWindowTitle(f"Профиль - {user_data.get('username', 'Пользователь')}")
+        self.setWindowTitle(f"Profile - {user_data.get('username', 'User')}")
         self.setFixedSize(340, 430)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -33,11 +33,11 @@ class UserProfileModal(QDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        username = self.user_data.get("username", "Пользователь")
+        username = self.user_data.get("username", "User")
         user_id = self.user_data.get("user_id", "")
         avatar_color = self.user_data.get("avatar_color", "#5865F2")
         avatar_image = self.user_data.get("avatar_image", "")
-        status_text = self.user_data.get("status_text", "В сети")
+        status_text = self.user_data.get("status_text", "Online")
         is_online = self.user_data.get("online", True)
 
         # 1. Header Banner
@@ -89,7 +89,9 @@ class UserProfileModal(QDialog):
         dot_color = "#23a55a" if is_online else "#80848e"
         dot = QLabel("●")
         dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
-        status_lbl = QLabel(status_text or ("В сети" if is_online else "Не в сети"))
+        fallback_status = "Online" if is_online else "Offline"
+        disp_status = status_text if status_text and status_text not in ("В сети", "Online") else fallback_status
+        status_lbl = QLabel(disp_status)
         status_lbl.setStyleSheet("color: #dbdee1; font-size: 13px;")
         status_box.addWidget(dot)
         status_box.addWidget(status_lbl)
@@ -103,11 +105,11 @@ class UserProfileModal(QDialog):
         content_layout.addWidget(div)
 
         # "About Me" Section
-        about_title = QLabel("О СЕБЕ")
+        about_title = QLabel("ABOUT ME")
         about_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #949ba4;")
         content_layout.addWidget(about_title)
 
-        bio_content = self.user_data.get("bio", "").strip() or "Пользователь VimCord 🚀"
+        bio_content = self.user_data.get("bio", "").strip() or "VimCord user 🚀"
         about_text = QLabel(bio_content)
         about_text.setWordWrap(True)
         about_text.setStyleSheet("""
@@ -126,7 +128,7 @@ class UserProfileModal(QDialog):
             btn_layout = QHBoxLayout()
             btn_layout.setSpacing(8)
 
-            dm_btn = QPushButton("💬 Написать")
+            dm_btn = QPushButton("💬 Message")
             dm_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #5865F2; color: #ffffff; font-weight: bold;
@@ -137,7 +139,7 @@ class UserProfileModal(QDialog):
             dm_btn.clicked.connect(self._on_dm_clicked)
             btn_layout.addWidget(dm_btn)
 
-            call_btn = QPushButton("📞 Позвонить")
+            call_btn = QPushButton("📞 Call")
             call_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #23a55a; color: #ffffff; font-weight: bold;
@@ -149,7 +151,7 @@ class UserProfileModal(QDialog):
             btn_layout.addWidget(call_btn)
 
             if not self.is_friend:
-                friend_btn = QPushButton("➕ В друзья")
+                friend_btn = QPushButton("➕ Add Friend")
                 friend_btn.setStyleSheet("""
                     QPushButton {
                         background-color: #4e5058; color: #ffffff; font-weight: bold;

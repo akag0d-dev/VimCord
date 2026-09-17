@@ -1,14 +1,18 @@
 """
 Main entry point for VimCord Client application.
-Supports registration, authentication, persistent session initialization, and audio setup.
+Supports registration, authentication, persistent session initialization,
+AppData auto-login, audio setup, and clean retry handling.
 """
 
 import argparse
 import sys
+from pathlib import Path
 from PyQt6.QtCore import QEventLoop, QTimer
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from vimcord.client.audio.audio_manager import AudioManager
+from vimcord.client.config import load_config, save_config
 from vimcord.client.network.tcp_client import TCPClient
 from vimcord.client.network.udp_voice import UDPVoiceClient
 from vimcord.client.ui.login_dialog import LoginDialog
@@ -20,10 +24,11 @@ from vimcord.common.protocol import DEFAULT_TCP_PORT, DEFAULT_UDP_PORT
 def main():
     parser = argparse.ArgumentParser(description="VimCord Client")
     parser.add_argument("--user", default="", help="Pre-filled username")
-    parser.add_argument("--host", default="127.0.0.1", help="Server IP address")
-    parser.add_argument("--tcp-port", type=int, default=DEFAULT_TCP_PORT, help="Server TCP port")
-    parser.add_argument("--udp-port", type=int, default=DEFAULT_UDP_PORT, help="Server UDP port")
+    parser.add_argument("--host", default="", help="Server IP address")
+    parser.add_argument("--tcp-port", type=int, default=0, help="Server TCP port")
+    parser.add_argument("--udp-port", type=int, default=0, help="Server UDP port")
     parser.add_argument("--auto", action="store_true", help="Auto-connect without login dialog")
+    parser.add_argument("--no-auto-login", action="store_true", help="Disable AppData auto-login")
     args = parser.parse_args()
 
     if sys.platform == "win32":
@@ -36,17 +41,16 @@ def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_THEME_QSS)
 
-    from pathlib import Path
-    from PyQt6.QtGui import QIcon
     icon_path = Path(__file__).resolve().parents[2] / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    server_host = args.host
-    tcp_port = args.tcp_port
-    udp_port = args.udp_port
-    username = args.user
-    password = ""
+    saved_cfg = load_config()
+    server_host = args.host or saved_cfg.get("host", "127.0.0.1")
+    tcp_port = args.tcp_port or saved_cfg.get("tcp_port", DEFAULT_TCP_PORT)
+    udp_port = args.udp_port or saved_cfg.get("udp_port", DEFAULT_UDP_PORT)
+    username = args.user or saved_cfg.get("username", "")
+    password = saved_cfg.get("saved_password", "") if (saved_cfg.get("auto_login") and not args.no_auto_login) else ""
     action = "login"
 
     # Audio & network subsystems
@@ -57,6 +61,35 @@ def main():
     authenticated = False
     login_data = {}
 
+    # Attempt automatic background login if enabled in AppData
+    if (saved_cfg.get("auto_login") and not args.no_auto_login and username and password and not args.auto):
+        if tcp_client.connect_to_server(server_host, tcp_port):
+            auto_res = {"success": False, "data": {}}
+            loop_auto = QEventLoop()
+
+            def on_auto_login(ok, data):
+                auto_res["success"] = ok
+                auto_res["data"] = data
+                loop_auto.quit()
+
+            tcp_client.signals.login_response.connect(on_auto_login)
+            try:
+                tcp_client.send_login(username, password)
+                QTimer.singleShot(2500, loop_auto.quit)
+                loop_auto.exec()
+            finally:
+                try:
+                    tcp_client.signals.login_response.disconnect(on_auto_login)
+                except Exception:
+                    pass
+
+            if auto_res["success"]:
+                authenticated = True
+                login_data = auto_res["data"]
+            else:
+                tcp_client.disconnect()
+
+    # Interactive login loop
     while not authenticated:
         if not args.auto or not username:
             login_dlg = LoginDialog(default_username=username)
@@ -70,10 +103,15 @@ def main():
             password = login_dlg.password
             action = login_dlg.action
 
-        # Connect if not connected
-        if not tcp_client.sock:
+        # Ensure TCP connection is active
+        if not tcp_client.sock or not tcp_client._is_running:
+            tcp_client.disconnect()
             if not tcp_client.connect_to_server(server_host, tcp_port):
-                QMessageBox.critical(None, "Ошибка подключения", f"Не удалось подключиться к {server_host}:{tcp_port}!\nУбедитесь, что run_server.py запущен.")
+                QMessageBox.critical(
+                    None,
+                    "Connection Error",
+                    f"Could not connect to {server_host}:{tcp_port}!\nPlease ensure the server is running."
+                )
                 if args.auto:
                     sys.exit(1)
                 continue
@@ -89,17 +127,23 @@ def main():
                 loop_reg.quit()
 
             tcp_client.signals.register_response.connect(on_reg)
-            tcp_client.send_register(username, password)
-            QTimer.singleShot(4000, loop_reg.quit)
-            loop_reg.exec()
+            try:
+                tcp_client.send_register(username, password)
+                QTimer.singleShot(4000, loop_reg.quit)
+                loop_reg.exec()
+            finally:
+                try:
+                    tcp_client.signals.register_response.disconnect(on_reg)
+                except Exception:
+                    pass
 
             if not reg_result["success"]:
-                QMessageBox.warning(None, "Ошибка регистрации", reg_result.get("message", "Не удалось зарегистрироваться"))
+                QMessageBox.warning(None, "Registration Error", reg_result.get("message", "Registration failed."))
                 if args.auto:
                     sys.exit(1)
                 continue
             else:
-                QMessageBox.information(None, "Успешно", "Аккаунт успешно создан! Выполняется автоматический вход...")
+                QMessageBox.information(None, "Success", "Account created successfully! Logging in...")
 
         # Handle Login
         login_res = {"success": False, "data": {}, "message": ""}
@@ -112,16 +156,23 @@ def main():
             loop_login.quit()
 
         tcp_client.signals.login_response.connect(on_login)
-        tcp_client.send_login(username, password)
-        QTimer.singleShot(4000, loop_login.quit)
-        loop_login.exec()
+        try:
+            tcp_client.send_login(username, password)
+            QTimer.singleShot(4000, loop_login.quit)
+            loop_login.exec()
+        finally:
+            try:
+                tcp_client.signals.login_response.disconnect(on_login)
+            except Exception:
+                pass
 
         if login_res["success"]:
             authenticated = True
             login_data = login_res["data"]
         else:
-            err_msg = login_res["message"] or "Неверный логин/пароль или сервер недоступен."
-            QMessageBox.warning(None, "Ошибка входа", err_msg)
+            err_msg = login_res["message"] or "Invalid username or password, or server is unreachable."
+            QMessageBox.warning(None, "Login Error", err_msg)
+            # Do NOT exit, loop back smoothly to let user retry immediately without restart
             if args.auto:
                 sys.exit(1)
 
@@ -130,7 +181,9 @@ def main():
     avatar_color = login_data.get("avatar_color", "#5865F2")
     avatar_image = login_data.get("avatar_image", "")
     bio = login_data.get("bio", "")
-    status_text = login_data.get("status_text", "В сети")
+    status_text = login_data.get("status_text", "Online")
+    if status_text == "В сети":
+        status_text = "Online"
     rooms = login_data.get("rooms", [])
     users = login_data.get("users", [])
     friends = login_data.get("friends", [])

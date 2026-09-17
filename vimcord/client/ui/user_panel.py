@@ -26,7 +26,7 @@ class UserPanel(QWidget):
         self.user_id = ""
         self.avatar_color = "#5865F2"
         self.avatar_image = ""
-        self.status_text = "В сети"
+        self.status_text = "Online"
 
         self._init_ui()
 
@@ -63,7 +63,7 @@ class UserPanel(QWidget):
         self.name_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 13px; background: transparent;")
         info_layout.addWidget(self.name_label)
 
-        self.status_label = QLabel("В сети")
+        self.status_label = QLabel("Online")
         self.status_label.setStyleSheet("color: #23a55a; font-size: 11px; background: transparent;")
         info_layout.addWidget(self.status_label)
 
@@ -102,33 +102,33 @@ class UserPanel(QWidget):
 
         # Mic button
         self.mic_btn = QPushButton("🎙️")
-        self.mic_btn.setToolTip("Заглушить микрофон (Mute)")
+        self.mic_btn.setToolTip("Mute Microphone")
         self.mic_btn.setStyleSheet(btn_style_normal)
         self.mic_btn.clicked.connect(self._toggle_mic)
         layout.addWidget(self.mic_btn)
 
         # Deafen button
         self.deafen_btn = QPushButton("🎧")
-        self.deafen_btn.setToolTip("Заглушить звук (Deafen)")
+        self.deafen_btn.setToolTip("Deafen Audio")
         self.deafen_btn.setStyleSheet(btn_style_normal)
         self.deafen_btn.clicked.connect(self._toggle_deafen)
         layout.addWidget(self.deafen_btn)
 
         # Settings button
         self.settings_btn = QPushButton("⚙️")
-        self.settings_btn.setToolTip("Настройки звука")
+        self.settings_btn.setToolTip("User Settings")
         self.settings_btn.setStyleSheet(btn_style_normal)
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.settings_btn)
 
-    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = ""):
+    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "Online", avatar_image: str = ""):
         self.username = username
         self.user_id = user_id
         self.avatar_color = avatar_color
         self.avatar_image = avatar_image
         self.status_text = status_text
         self.name_label.setText(username)
-        self.status_label.setText(status_text or "В сети")
+        self.status_label.setText(status_text or "Online")
         pixmap = get_round_avatar_pixmap(36, username, avatar_color, avatar_image)
         self.avatar_label.setPixmap(pixmap)
         self.avatar_label.setStyleSheet("background: transparent; border: none;")

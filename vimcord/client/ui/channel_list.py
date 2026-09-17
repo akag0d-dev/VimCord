@@ -53,13 +53,13 @@ class ChannelListWidget(QWidget):
         header_layout.setContentsMargins(16, 0, 8, 0)
         header_layout.setSpacing(4)
 
-        self.header_title = QLabel("Личные сообщения")
+        self.header_title = QLabel("Direct Messages")
         self.header_title.setStyleSheet("font-weight: bold; font-size: 15px; color: #ffffff;")
         header_layout.addWidget(self.header_title, 1)
 
         # Invite button (Room mode only)
         self.invite_btn = QPushButton("🔗")
-        self.invite_btn.setToolTip("Создать ссылку-приглашение на сервер")
+        self.invite_btn.setToolTip("Create Server Invite")
         self.invite_btn.setFixedSize(26, 26)
         self.invite_btn.setStyleSheet("""
             QPushButton {
@@ -72,7 +72,7 @@ class ChannelListWidget(QWidget):
 
         # Add Channel button (Room mode only)
         self.add_ch_btn = QPushButton("+")
-        self.add_ch_btn.setToolTip("Создать канал")
+        self.add_ch_btn.setToolTip("Create Channel")
         self.add_ch_btn.setFixedSize(26, 26)
         self.add_ch_btn.setStyleSheet("""
             QPushButton {
@@ -86,7 +86,7 @@ class ChannelListWidget(QWidget):
 
         # Leave Room button
         self.leave_room_btn = QPushButton("🚪")
-        self.leave_room_btn.setToolTip("Покинуть сервер")
+        self.leave_room_btn.setToolTip("Leave Server")
         self.leave_room_btn.setFixedSize(26, 26)
         self.leave_room_btn.setStyleSheet("""
             QPushButton {
@@ -99,7 +99,7 @@ class ChannelListWidget(QWidget):
 
         # Delete Room button (Owner only)
         self.del_room_btn = QPushButton("🗑️")
-        self.del_room_btn.setToolTip("Удалить сервер")
+        self.del_room_btn.setToolTip("Delete Server")
         self.del_room_btn.setFixedSize(26, 26)
         self.del_room_btn.setStyleSheet("""
             QPushButton {
@@ -134,7 +134,7 @@ class ChannelListWidget(QWidget):
     def show_dm_mode(self, users: List[Dict[str, Any]]):
         self.current_mode = "@me"
         self.current_users_list = users
-        self.header_title.setText("Личные сообщения")
+        self.header_title.setText("Direct Messages")
         self.invite_btn.hide()
         self.add_ch_btn.hide()
         self.leave_room_btn.hide()
@@ -144,7 +144,7 @@ class ChannelListWidget(QWidget):
     def show_room_mode(self, room: Dict[str, Any]):
         self.current_mode = room.get("room_id")
         self.current_room_data = room
-        self.header_title.setText(room.get("name", "Сервер"))
+        self.header_title.setText(room.get("name", "Server"))
         self.invite_btn.show()
         self.add_ch_btn.show()
 
@@ -180,8 +180,8 @@ class ChannelListWidget(QWidget):
     def _render_dm_list(self):
         self._clear_content()
 
-        # "Друзья" Nav Button
-        friends_btn = QPushButton("👥  Друзья")
+        # Friends Nav Button
+        friends_btn = QPushButton("👥  Friends")
         friends_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #ffffff; font-weight: bold;
@@ -193,14 +193,14 @@ class ChannelListWidget(QWidget):
         self.content_layout.addWidget(friends_btn)
 
         # Section Header
-        sec_label = QLabel("ПРЯМЫЕ СООБЩЕНИЯ")
+        sec_label = QLabel("DIRECT MESSAGES")
         sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 14px 8px 4px 8px;")
         self.content_layout.addWidget(sec_label)
 
         # Privacy filter: ONLY show confirmed friends in DMs
         confirmed_friends = [f for f in self.friends_list if f.get("friendship_status") == "accepted"]
         if not confirmed_friends:
-            empty_lbl = QLabel("Нет друзей в списке\nПерейдите во вкладку 'Друзья', чтобы отправить заявку 👥")
+            empty_lbl = QLabel("No friends yet\nGo to the 'Friends' tab to add friends 👥")
             empty_lbl.setWordWrap(True)
             empty_lbl.setStyleSheet("color: #80848e; font-size: 12px; padding: 10px 8px; line-height: 1.4;")
             self.content_layout.addWidget(empty_lbl)
@@ -251,7 +251,7 @@ class ChannelListWidget(QWidget):
             av_lbl.setFixedSize(26, 26)
             av_lbl.setPixmap(get_round_avatar_pixmap(26, uname, color, avatar_img))
             av_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-            av_lbl.setToolTip("Посмотреть профиль")
+            av_lbl.setToolTip("View Profile")
             av_lbl.mousePressEvent = lambda e, ud=matched_user_dict: self.user_profile_requested.emit(ud)
             i_layout.addWidget(av_lbl)
 
@@ -269,7 +269,7 @@ class ChannelListWidget(QWidget):
 
             # Quick Call button
             call_btn = QPushButton("📞")
-            call_btn.setToolTip("Позвонить лично")
+            call_btn.setToolTip("Call")
             call_btn.setFixedSize(24, 24)
             call_btn.setStyleSheet("""
                 QPushButton { background: transparent; border: none; border-radius: 12px; font-size: 11px; }
@@ -290,7 +290,7 @@ class ChannelListWidget(QWidget):
         voice_channels = [c for c in channels if c.get("channel_type") == "voice"]
 
         # Text channels section
-        lbl_text = QLabel("ТЕКСТОВЫЕ КАНАЛЫ")
+        lbl_text = QLabel("TEXT CHANNELS")
         lbl_text.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 6px 8px;")
         self.content_layout.addWidget(lbl_text)
 
@@ -312,13 +312,13 @@ class ChannelListWidget(QWidget):
             self.content_layout.addWidget(btn)
 
         # Voice channels section
-        lbl_voice = QLabel("ГОЛОСОВЫЕ КАНАЛЫ")
+        lbl_voice = QLabel("VOICE CHANNELS")
         lbl_voice.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 12px 8px 6px 8px;")
         self.content_layout.addWidget(lbl_voice)
 
         for vc in voice_channels:
             cid = vc.get("channel_id")
-            raw_cname = vc.get("name", "Голосовой")
+            raw_cname = vc.get("name", "Voice")
             # Clean leading speaker icon if already present to prevent double 🔊 🔊
             clean_name = raw_cname.lstrip("🔊 ").strip()
             voice_users = vc.get("voice_users", [])
@@ -364,7 +364,7 @@ class ChannelListWidget(QWidget):
                         media_badge = " 🔇"
 
                     vu_btn = QPushButton(f"🎙️ {uname}{media_badge}")
-                    vu_btn.setToolTip("Нажмите для просмотра профиля")
+                    vu_btn.setToolTip("Click to view profile")
                     vu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                     vu_btn.setStyleSheet("""
                         QPushButton {
@@ -409,8 +409,8 @@ class ChannelListWidget(QWidget):
     def _on_delete_room(self):
         if self.current_mode and self.current_mode != "@me":
             ret = QMessageBox.question(
-                self, "Удаление сервера",
-                f"Вы уверены, что хотите удалить комнату '{self.header_title.text()}'?",
+                self, "Delete Server",
+                f"Are you sure you want to delete server '{self.header_title.text()}'?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if ret == QMessageBox.StandardButton.Yes:

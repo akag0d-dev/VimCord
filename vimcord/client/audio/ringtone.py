@@ -65,3 +65,61 @@ def generate_leave_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
     t1 = generate_tone(660.0, 0.08, sample_rate, volume=0.2)
     t2 = generate_tone(330.0, 0.12, sample_rate, volume=0.2)
     return np.concatenate([t1, t2]).tobytes()
+
+
+def generate_message_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Soft warm harmonic bubble pop when receiving a chat message."""
+    dur = 0.16
+    t = np.linspace(0, dur, int(sample_rate * dur), endpoint=False)
+    # Fundamental 659.25Hz (E5) + 987.77Hz (B5) with exponential decay
+    env = np.exp(-18 * t)
+    wave = 0.6 * np.sin(2 * np.pi * 659.25 * t) + 0.4 * np.sin(2 * np.pi * 987.77 * t)
+    # Anti-click fade-in
+    fade_len = int(sample_rate * 0.005)
+    wave[:fade_len] *= np.linspace(0, 1, fade_len)
+    scaled = wave * env * (32767 * 0.28)
+    return np.clip(scaled, -32768, 32767).astype(np.int16).tobytes()
+
+
+def generate_notification_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Melodic two-note chime for toast notifications (A5 -> C#6)."""
+    t1 = generate_tone(880.0, 0.08, sample_rate, volume=0.22)
+    t2 = generate_tone(1108.73, 0.15, sample_rate, volume=0.26)
+    return np.concatenate([t1, t2]).tobytes()
+
+
+def generate_mute_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Subtle downward click when muting."""
+    dur = 0.05
+    t = np.linspace(0, dur, int(sample_rate * dur), endpoint=False)
+    freq = np.linspace(420.0, 210.0, len(t))
+    env = np.exp(-25 * t)
+    wave = np.sin(2 * np.pi * freq * t) * env * (32767 * 0.22)
+    return np.clip(wave, -32768, 32767).astype(np.int16).tobytes()
+
+
+def generate_unmute_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Crisp upward blip when unmuting."""
+    dur = 0.05
+    t = np.linspace(0, dur, int(sample_rate * dur), endpoint=False)
+    freq = np.linspace(260.0, 560.0, len(t))
+    env = np.exp(-20 * t)
+    wave = np.sin(2 * np.pi * freq * t) * env * (32767 * 0.24)
+    return np.clip(wave, -32768, 32767).astype(np.int16).tobytes()
+
+
+def generate_deafen_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Low dampened tone when deafening."""
+    dur = 0.07
+    t = np.linspace(0, dur, int(sample_rate * dur), endpoint=False)
+    env = np.exp(-16 * t)
+    wave = np.sin(2 * np.pi * 200.0 * t) * env * (32767 * 0.22)
+    return np.clip(wave, -32768, 32767).astype(np.int16).tobytes()
+
+
+def generate_undeafen_sound(sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Bright upward chime when undeafening."""
+    t1 = generate_tone(350.0, 0.04, sample_rate, volume=0.2)
+    t2 = generate_tone(600.0, 0.08, sample_rate, volume=0.25)
+    return np.concatenate([t1, t2]).tobytes()
+

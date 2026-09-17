@@ -40,12 +40,12 @@ class VoiceConnectedBar(QWidget):
         info_layout.setSpacing(1)
 
         # Status text with green dot
-        self.status_lbl = QLabel("●  Голос подключен")
+        self.status_lbl = QLabel("●  Voice Connected")
         self.status_lbl.setStyleSheet("color: #23a55a; font-size: 11px; font-weight: bold;")
         info_layout.addWidget(self.status_lbl)
 
         # Channel name button/label
-        self.channel_btn = QPushButton("🔊 Голосовой канал")
+        self.channel_btn = QPushButton("🔊 Voice Channel")
         self.channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.channel_btn.setStyleSheet("""
             QPushButton {
@@ -68,7 +68,7 @@ class VoiceConnectedBar(QWidget):
 
         # Screen Share button
         self.screen_btn = QPushButton("🖥️")
-        self.screen_btn.setToolTip("Демонстрация экрана")
+        self.screen_btn.setToolTip("Share Screen")
         self.screen_btn.setFixedSize(30, 30)
         self.screen_btn.setStyleSheet("""
             QPushButton {
@@ -86,7 +86,7 @@ class VoiceConnectedBar(QWidget):
 
         # Disconnect button
         self.disconnect_btn = QPushButton("📞")
-        self.disconnect_btn.setToolTip("Отключиться от голосового канала")
+        self.disconnect_btn.setToolTip("Disconnect")
         self.disconnect_btn.setFixedSize(30, 30)
         self.disconnect_btn.setStyleSheet("""
             QPushButton {
@@ -106,7 +106,7 @@ class VoiceConnectedBar(QWidget):
     def set_channel(self, room_name: str, channel_name: str):
         clean_name = channel_name.lstrip("🔊 ").strip()
         display_text = f"🔊 {clean_name}"
-        if room_name and room_name != "Главный Сервер":
+        if room_name and room_name not in ("General", "Main Server", "Главный Сервер"):
             display_text += f" / {room_name}"
         self.channel_btn.setText(display_text)
         self.channel_btn.setToolTip(f"{channel_name} ({room_name})")
@@ -114,9 +114,9 @@ class VoiceConnectedBar(QWidget):
     def update_ping(self, ping_ms: int):
         if ping_ms > 0:
             quality_dot = "🟢" if ping_ms < 60 else ("🟡" if ping_ms < 150 else "🔴")
-            self.status_lbl.setText(f"{quality_dot} Голос | {ping_ms} ms")
+            self.status_lbl.setText(f"{quality_dot} Voice | {ping_ms} ms")
         else:
-            self.status_lbl.setText("● Голос подключен")
+            self.status_lbl.setText("● Voice Connected")
 
     def set_screen_sharing(self, is_sharing: bool):
         self.is_sharing = is_sharing
@@ -132,7 +132,7 @@ class VoiceConnectedBar(QWidget):
                     background-color: #1f9450;
                 }
             """)
-            self.screen_btn.setToolTip("Остановить демонстрацию экрана")
+            self.screen_btn.setToolTip("Stop Screen Sharing")
         else:
             self.screen_btn.setStyleSheet("""
                 QPushButton {
@@ -145,4 +145,4 @@ class VoiceConnectedBar(QWidget):
                     background-color: #35373c;
                 }
             """)
-            self.screen_btn.setToolTip("Демонстрация экрана")
+            self.screen_btn.setToolTip("Share Screen")

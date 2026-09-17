@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt, QByteArray
 class ImageViewerModal(QDialog):
     def __init__(self, base64_image: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Просмотр изображения — VimCord")
+        self.setWindowTitle("Image Viewer — VimCord")
         self.resize(850, 650)
         self.setStyleSheet("""
             QDialog {
@@ -76,7 +76,7 @@ class ImageViewerModal(QDialog):
             )
             self.image_label.setPixmap(scaled)
         else:
-            self.image_label.setText("Не удалось загрузить изображение.")
+            self.image_label.setText("Failed to load image.")
 
         scroll.setWidget(self.image_label)
         layout.addWidget(scroll, 1)
@@ -85,18 +85,18 @@ class ImageViewerModal(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        info_lbl = QLabel(f"Размер: {self.pixmap.width()} x {self.pixmap.height()} px" if not self.pixmap.isNull() else "")
+        info_lbl = QLabel(f"Dimensions: {self.pixmap.width()} x {self.pixmap.height()} px" if not self.pixmap.isNull() else "")
         info_lbl.setStyleSheet("color: #949ba4; font-size: 12px;")
         btn_layout.addWidget(info_lbl)
 
         btn_layout.addStretch(1)
 
-        save_btn = QPushButton("💾 Сохранить...")
+        save_btn = QPushButton("💾 Save Image...")
         save_btn.setObjectName("saveBtn")
         save_btn.clicked.connect(self._save_image)
         btn_layout.addWidget(save_btn)
 
-        close_btn = QPushButton("Закрыть")
+        close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
 
@@ -107,13 +107,13 @@ class ImageViewerModal(QDialog):
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Сохранить изображение",
+            "Save Image",
             "vimcord_image.png",
             "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg);;All Files (*)"
         )
         if path:
             try:
                 self.pixmap.save(path)
-                QMessageBox.information(self, "Успех", "Изображение успешно сохранено!")
+                QMessageBox.information(self, "Success", "Image saved successfully!")
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to save image: {e}")

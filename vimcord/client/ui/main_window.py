@@ -34,7 +34,7 @@ from vimcord.client.ui.call_overlay import IncomingCallDialog, ActiveCallBanner
 from vimcord.client.ui.settings_dialog import SettingsDialog
 from vimcord.client.ui.profile_modal import UserProfileModal
 from vimcord.client.ui.screen_window import ScreenShareWindow
-from vimcord.client.ui.toast_notification import ToastNotification
+from vimcord.client.ui.toast_notification import ToastNotification, show_windows_toast
 from vimcord.client.ui.member_list import MemberListWidget
 
 logger = logging.getLogger("VimCord.MainWindow")
@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self.my_avatar_color = "#5865F2"
         self.my_avatar_image = ""
         self.my_bio = ""
-        self.my_status_text = "В сети"
+        self.my_status_text = "Online"
         self.server_host = "127.0.0.1"
         self.server_udp_port = 9989
 
@@ -126,10 +126,10 @@ class MainWindow(QMainWindow):
         self.tray_icon.setToolTip("VimCord")
 
         tray_menu = QMenu()
-        restore_action = tray_menu.addAction("Открыть VimCord")
+        restore_action = tray_menu.addAction("Open VimCord")
         restore_action.triggered.connect(self._bring_to_front)
         tray_menu.addSeparator()
-        quit_action = tray_menu.addAction("Выход")
+        quit_action = tray_menu.addAction("Exit")
         quit_action.triggered.connect(self.close)
         self.tray_icon.setContextMenu(tray_menu)
 
@@ -161,9 +161,13 @@ class MainWindow(QMainWindow):
             icon=icon_str,
             payload=payload
         )
-        # 2. Native OS System Notification (Windows Action Center / Notification Tray)
+        # 2. Native OS System Notification (Windows 10/11 Action Center)
+        show_windows_toast(title, message, on_click=self._bring_to_front)
         if self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
             self.tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4500)
+        # 3. Audio chime
+        if hasattr(self, "audio_manager") and self.audio_manager:
+            self.audio_manager.play_notification_chime()
 
     def _init_ui(self):
         central_widget = QWidget(self)
@@ -348,7 +352,7 @@ class MainWindow(QMainWindow):
         self.my_avatar_color = avatar_color or "#5865F2"
         self.my_avatar_image = avatar_image or ""
         self.my_bio = bio or ""
-        self.my_status_text = status_text or "В сети"
+        self.my_status_text = status_text or "Online"
         self.server_host = host
         self.server_udp_port = udp_port
 
@@ -417,17 +421,17 @@ class MainWindow(QMainWindow):
             self._on_text_channel_selected(room_id, first_ch["channel_id"], first_ch["name"])
 
     def _on_server_add_or_join_prompt(self):
-        items = ["Создать новый сервер (комнату)", "Присоединиться по инвайт-коду"]
-        choice, ok = QInputDialog.getItem(self, "Серверы VimCord", "Выберите действие:", items, 0, False)
+        items = ["Create New Server", "Join with Invite Code"]
+        choice, ok = QInputDialog.getItem(self, "VimCord Servers", "Select an action:", items, 0, False)
         if not ok:
             return
 
-        if "Создать" in choice:
-            name, ok2 = QInputDialog.getText(self, "Создать сервер", "Название нового сервера:")
+        if "Create" in choice:
+            name, ok2 = QInputDialog.getText(self, "Create Server", "Server name:")
             if ok2 and name.strip():
                 self.tcp_client.send_create_room(name.strip())
         else:
-            code, ok2 = QInputDialog.getText(self, "Присоединиться к серверу", "Введите код приглашения (например, VC-A1B2):")
+            code, ok2 = QInputDialog.getText(self, "Join Server", "Enter invite code (e.g. VC-A1B2):")
             if ok2 and code.strip():
                 self.tcp_client.send_join_room_by_invite(code.strip())
 
@@ -439,8 +443,8 @@ class MainWindow(QMainWindow):
         clipboard = QApplication.clipboard()
         clipboard.setText(code)
         QMessageBox.information(
-            self, "Приглашение на сервер",
-            f"Код приглашения создан и скопирован в буфер обмена!\n\nКод: {code}\n\nОтправьте его друзьям, чтобы они присоединились к серверу."
+            self, "Server Invite",
+            f"Invite code created and copied to clipboard!\n\nCode: {code}\n\nSend it to friends so they can join."
         )
 
     def _on_room_invite_joined(self, success: bool, data: Dict[str, Any]):
@@ -452,18 +456,18 @@ class MainWindow(QMainWindow):
                 self.server_nav.add_room_button(room)
                 self._on_room_nav_selected(rid)
                 self.server_nav.set_active(rid)
-            QMessageBox.information(self, "Успешно", f"Вы присоединились к серверу '{room.get('name')}'!")
+            QMessageBox.information(self, "Success", f"You joined '{room.get('name')}'!")
         else:
-            QMessageBox.warning(self, "Ошибка", data.get("message", "Не удалось присоединиться по коду"))
+            QMessageBox.warning(self, "Error", data.get("message", "Failed to join using invite code"))
 
     def _on_create_channel_prompt(self, room_id: str):
-        items = ["Текстовый канал", "Голосовой канал"]
-        ch_type_str, ok1 = QInputDialog.getItem(self, "Создать канал", "Тип канала:", items, 0, False)
+        items = ["Text Channel", "Voice Channel"]
+        ch_type_str, ok1 = QInputDialog.getItem(self, "Create Channel", "Channel type:", items, 0, False)
         if not ok1:
             return
         
-        ch_type = "voice" if "Голосовой" in ch_type_str else "text"
-        name, ok2 = QInputDialog.getText(self, "Создать канал", "Название канала:")
+        ch_type = "voice" if "Voice" in ch_type_str else "text"
+        name, ok2 = QInputDialog.getText(self, "Create Channel", "Channel name:")
         if ok2 and name.strip():
             self.tcp_client.send_create_channel(room_id, name.strip(), ch_type)
 
@@ -544,8 +548,8 @@ class MainWindow(QMainWindow):
     def _on_call_user_requested(self, user_id: str):
         if self.active_call_id or self.current_voice_channel_id:
             ret = QMessageBox.question(
-                self, "Звонок",
-                "Вы уже находитесь в голосовом канале или звонке. Переключиться на новый звонок?",
+                self, "Call",
+                "You are already in a voice channel or call. Switch to this call?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if ret != QMessageBox.StandardButton.Yes:
@@ -559,7 +563,8 @@ class MainWindow(QMainWindow):
 
     # ------------------ Text Chat ------------------
 
-    def _on_send_chat_message(self, text: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
+    def _on_send_chat_message(self, text: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0,
+                              file_data: str = "", file_name: str = "", file_size: int = 0):
         target_type = "channel" if self.current_text_channel_id else "dm"
         target_id = self.current_text_channel_id if self.current_text_channel_id else self.current_dm_peer_id
         if not target_id:
@@ -567,7 +572,8 @@ class MainWindow(QMainWindow):
 
         self.tcp_client.send_chat_message(target_type, target_id,
                                           content=text, image_data=image_data,
-                                          voice_data=voice_data, voice_duration=voice_duration)
+                                          voice_data=voice_data, voice_duration=voice_duration,
+                                          file_data=file_data, file_name=file_name, file_size=file_size)
 
         # Optimistic local append for immediate visual feedback
         local_msg = {
@@ -582,6 +588,9 @@ class MainWindow(QMainWindow):
             "image_data": image_data,
             "voice_data": voice_data,
             "voice_duration": voice_duration,
+            "file_data": file_data,
+            "file_name": file_name,
+            "file_size": file_size,
             "timestamp": time.time()
         }
         self.chat_view.append_message(local_msg)
@@ -613,6 +622,10 @@ class MainWindow(QMainWindow):
             msg_copy["target_id"] = dm_peer
             self.chat_view.append_message(msg_copy)
 
+        # Play incoming message audio chime
+        if sender_id != self.my_user_id:
+            self.audio_manager.play_message_chime()
+
         # Show notification toast / system notification if chat is not in focus or window not active
         is_focused = False
         if self.main_stack.currentIndex() == 1 and self.isActiveWindow() and not self.isMinimized():
@@ -622,14 +635,16 @@ class MainWindow(QMainWindow):
                 is_focused = True
 
         if sender_id != self.my_user_id and not is_focused:
-            s_name = msg.get("sender_name", "Пользователь")
+            s_name = msg.get("sender_name", "User")
             content = msg.get("content", "")
             if not content and msg.get("image_data"):
-                content = "📷 [Изображение]"
+                content = "📷 [Photo]"
+            elif not content and msg.get("file_name"):
+                content = f"📎 [{msg.get('file_name')}]"
             elif not content and msg.get("voice_data"):
-                content = "🎙️ [Голосовое сообщение]"
+                content = "🎙️ [Voice Message]"
             self.notify_user(
-                title=f"Сообщение от {s_name}",
+                title=f"Message from {s_name}",
                 message=content,
                 icon_str="💬",
                 payload={"type": "chat", "msg": msg}
@@ -649,7 +664,7 @@ class MainWindow(QMainWindow):
                     for c in r.get("channels", []):
                         if c.get("channel_id") == tid:
                             self._on_room_nav_selected(r["room_id"])
-                            self._on_text_channel_selected(r["room_id"], tid, c.get("name", "канал"))
+                            self._on_text_channel_selected(r["room_id"], tid, c.get("name", "channel"))
                             return
             elif ttype == "dm":
                 target_uid = sid if sid != self.my_user_id else tid
@@ -664,7 +679,7 @@ class MainWindow(QMainWindow):
         target = self.active_call_id or self.current_voice_channel_id
         target_type = "call" if self.active_call_id else "channel"
         if not target:
-            QMessageBox.information(self, "Демонстрация экрана", "Подключитесь к голосовому каналу или звонку, чтобы включить демонстрацию экрана.")
+            QMessageBox.information(self, "Screen Share", "Connect to a voice channel or call first to share your screen.")
             return
 
         if is_sharing is None:
@@ -675,14 +690,14 @@ class MainWindow(QMainWindow):
         if new_sharing:
             self.screen_capturer.start_sharing(self.my_user_id, target, target_type)
             self.voice_bar.set_screen_sharing(True)
-            self.voice_view.screen_btn.setText("🔴 Остановить экран")
+            self.voice_view.screen_btn.setText("🔴 Stop Screen")
             self.screen_share_window.set_streamer(self.my_username, is_local=True)
             self.screen_share_window.show()
         else:
             self.screen_capturer.stop_sharing()
             self.tcp_client.send_screen_stop(target_type, target)
             self.voice_bar.set_screen_sharing(False)
-            self.voice_view.screen_btn.setText("🖥️ Экран")
+            self.voice_view.screen_btn.setText("🖥️ Screen")
             self.screen_share_window.hide()
 
     def _send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
@@ -729,8 +744,8 @@ class MainWindow(QMainWindow):
         self.incoming_dialog.declined_signal.connect(self._on_decline_incoming_call)
         self.incoming_dialog.show()
         self.notify_user(
-            title="Входящий вызов",
-            message=f"{from_username} звонит вам в VimCord!",
+            title="Incoming Call",
+            message=f"{from_username} is calling you on VimCord!",
             icon_str="📞",
             payload={"type": "call", "call_id": call_id}
         )
@@ -754,7 +769,7 @@ class MainWindow(QMainWindow):
         self.udp_voice.active_call_id = call_id
 
         self.call_banner.start(peer_name)
-        self.voice_bar.set_channel("Личный звонок", peer_name)
+        self.voice_bar.set_channel("Direct Call", peer_name)
         self.voice_bar.show()
         self.main_stack.setCurrentIndex(1)
 
@@ -762,7 +777,7 @@ class MainWindow(QMainWindow):
         if peer_id in self.users:
             peer_color = self.users[peer_id].get("avatar_color", "#5865F2")
 
-        self.voice_view.set_channel_info(f"Личный звонок: {peer_name}")
+        self.voice_view.set_channel_info(f"Direct Call: {peer_name}")
         self.voice_view.update_participants([
             {"user_id": self.my_user_id, "username": self.my_username, "avatar_color": self.my_avatar_color},
             {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
@@ -770,7 +785,7 @@ class MainWindow(QMainWindow):
 
     def _on_call_declined(self, call_id: str):
         self.audio_manager.stop_ringtone()
-        QMessageBox.information(self, "Звонок отклонен", "Собеседник отклонил вызов.")
+        QMessageBox.information(self, "Call Declined", "Call was declined.")
 
     def _on_call_ended(self, call_id: str):
         self.audio_manager.stop_ringtone()
@@ -788,7 +803,7 @@ class MainWindow(QMainWindow):
 
     def _on_call_failed(self, reason: str):
         self.audio_manager.stop_ringtone()
-        QMessageBox.warning(self, "Ошибка вызова", reason)
+        QMessageBox.warning(self, "Call Failed", reason)
 
     def _on_end_active_call(self):
         if self.active_call_id:
@@ -808,10 +823,12 @@ class MainWindow(QMainWindow):
 
     def _on_mic_toggled(self, is_muted: bool):
         self.audio_manager.is_muted = is_muted
+        self.audio_manager.play_mute_chime(is_muted)
         self.tcp_client.send_user_media_state(is_muted, self.user_panel.is_deafened)
 
     def _on_deafen_toggled(self, is_deafened: bool):
         self.audio_manager.is_deafened = is_deafened
+        self.audio_manager.play_deafen_chime(is_deafened)
         self.tcp_client.send_user_media_state(self.user_panel.is_muted, is_deafened)
 
     def _on_user_media_state(self, update: Dict[str, Any]):
@@ -956,6 +973,14 @@ class MainWindow(QMainWindow):
         self._open_user_profile({"user_id": self.my_user_id, "username": self.my_username})
 
     def _on_logout_requested(self):
+        try:
+            from vimcord.client.config import load_config, save_config
+            cfg = load_config()
+            cfg["auto_login"] = False
+            cfg["saved_password"] = ""
+            save_config(cfg)
+        except Exception:
+            pass
         self.close()
 
     def _on_peer_speaking(self, user_id: str, is_speaking: bool):
@@ -1009,8 +1034,8 @@ class MainWindow(QMainWindow):
         for f in friends_list:
             if f.get("is_incoming") and f["peer_id"] not in old_incoming:
                 self.notify_user(
-                    title="Заявка в друзья",
-                    message=f"Пользователь {f.get('username')} отправил вам заявку!",
+                    title="Friend Request",
+                    message=f"{f.get('username')} sent you a friend request!",
                     icon_str="👥",
                     payload={"type": "friend_req", "peer_id": f.get("peer_id")}
                 )
@@ -1031,12 +1056,14 @@ class MainWindow(QMainWindow):
             self.my_status_text = user_dict.get("status_text", self.my_status_text)
             self.user_panel.set_user(self.my_username, self.my_user_id, self.my_avatar_color, self.my_status_text, self.my_avatar_image)
             self.setWindowTitle(f"VimCord — {self.my_username}")
+        else:
+            QMessageBox.warning(self, "Profile Update", message or "Failed to update profile.")
 
     def _on_change_password_resp(self, success: bool, message: str):
         if success:
-            QMessageBox.information(self, "Пароль", message)
+            QMessageBox.information(self, "Password", message)
         else:
-            QMessageBox.warning(self, "Пароль", message)
+            QMessageBox.warning(self, "Password", message)
 
     def _on_user_presence(self, user_dict: Dict[str, Any]):
         uid = user_dict.get("user_id")
@@ -1127,17 +1154,19 @@ class MainWindow(QMainWindow):
             self.audio_manager.clear_peers()
 
     def _on_server_disconnected(self):
+        if getattr(self, "_is_closing", False):
+            return
         self.voice_bar.hide()
         self.voice_view.hide()
         self.call_banner.stop()
         self.audio_manager.stop()
         self.udp_voice.stop()
-        QMessageBox.critical(self, "Разрыв связи", "Соединение с сервером VimCord потеряно.")
+        QMessageBox.critical(self, "Disconnected", "Connection to the VimCord server has been lost.")
 
     def _on_leave_room(self, room_id: str):
         ret = QMessageBox.question(
-            self, "Покинуть сервер",
-            "Вы уверены, что хотите покинуть этот сервер?",
+            self, "Leave Server",
+            "Are you sure you want to leave this server?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if ret == QMessageBox.StandardButton.Yes:
@@ -1149,9 +1178,9 @@ class MainWindow(QMainWindow):
             self.server_nav.remove_room_button(room_id)
             if self.current_room_id == room_id:
                 self._on_dm_nav_selected()
-            QMessageBox.information(self, "Сервер", "Вы покинули сервер.")
+            QMessageBox.information(self, "Server", "You left the server.")
         else:
-            QMessageBox.warning(self, "Ошибка", message or "Не удалось покинуть сервер.")
+            QMessageBox.warning(self, "Error", message or "Failed to leave server.")
 
     def _on_room_members_resp(self, room_id: str, members: List[Dict[str, Any]]):
         if self.current_room_id == room_id:
@@ -1203,6 +1232,11 @@ class MainWindow(QMainWindow):
         super().keyReleaseEvent(event)
 
     def closeEvent(self, event):
+        self._is_closing = True
+        try:
+            self.tcp_client.signals.disconnected.disconnect(self._on_server_disconnected)
+        except Exception:
+            pass
         self.ping_timer.stop()
         if self.tray_icon:
             self.tray_icon.hide()

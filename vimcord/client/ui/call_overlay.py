@@ -19,7 +19,7 @@ class IncomingCallDialog(QDialog):
         self.from_user_id = from_user_id
         self.from_username = from_username
 
-        self.setWindowTitle("Входящий звонок — VimCord")
+        self.setWindowTitle("Incoming Call — VimCord")
         self.setFixedSize(340, 220)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setObjectName("incoming_call_dialog")
@@ -39,7 +39,7 @@ class IncomingCallDialog(QDialog):
         layout.addWidget(icon)
 
         # Caller label
-        caller_lbl = QLabel(f"Входящий звонок от:")
+        caller_lbl = QLabel("Incoming Call from:")
         caller_lbl.setStyleSheet("color: #949ba4; font-size: 13px;")
         caller_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(caller_lbl)
@@ -53,12 +53,12 @@ class IncomingCallDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(14)
 
-        self.accept_btn = QPushButton("Принять 📞")
+        self.accept_btn = QPushButton("Accept 📞")
         self.accept_btn.setObjectName("call_accept_btn")
         self.accept_btn.clicked.connect(self._on_accept)
         btn_layout.addWidget(self.accept_btn)
 
-        self.decline_btn = QPushButton("Отклонить ❌")
+        self.decline_btn = QPushButton("Decline ❌")
         self.decline_btn.setObjectName("call_decline_btn")
         self.decline_btn.clicked.connect(self._on_decline)
         btn_layout.addWidget(self.decline_btn)
@@ -109,7 +109,7 @@ class ActiveCallBanner(QWidget):
         icon.setStyleSheet("font-size: 18px; color: white;")
         layout.addWidget(icon)
 
-        self.info_lbl = QLabel("Звонок с пользователем")
+        self.info_lbl = QLabel("Call in progress")
         self.info_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
         layout.addWidget(self.info_lbl, 1)
 
@@ -117,7 +117,7 @@ class ActiveCallBanner(QWidget):
         self.timer_lbl.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
         layout.addWidget(self.timer_lbl)
 
-        self.end_btn = QPushButton("Завершить")
+        self.end_btn = QPushButton("End Call")
         self.end_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f23f43;
@@ -135,7 +135,7 @@ class ActiveCallBanner(QWidget):
         layout.addWidget(self.end_btn)
 
     def start(self, peer_name: str):
-        self.info_lbl.setText(f"Звонок: {peer_name}")
+        self.info_lbl.setText(f"Call: {peer_name}")
         self.start_time = time.time()
         self.timer_lbl.setText("00:00")
         self.timer.start()

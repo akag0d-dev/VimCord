@@ -26,7 +26,13 @@ from vimcord.client.audio.ringtone import (
     generate_incoming_ringtone,
     generate_outgoing_ringtone,
     generate_join_sound,
-    generate_leave_sound
+    generate_leave_sound,
+    generate_message_sound,
+    generate_notification_sound,
+    generate_mute_sound,
+    generate_unmute_sound,
+    generate_deafen_sound,
+    generate_undeafen_sound
 )
 
 logger = logging.getLogger("VimCord.AudioManager")
@@ -264,6 +270,20 @@ class AudioManager:
 
     def play_leave_chime(self):
         self.play_sound_effect(generate_leave_sound())
+
+    def play_message_chime(self):
+        self.play_sound_effect(generate_message_sound())
+
+    def play_notification_chime(self):
+        self.play_sound_effect(generate_notification_sound())
+
+    def play_mute_chime(self, is_muted: bool):
+        snd = generate_mute_sound() if is_muted else generate_unmute_sound()
+        self.play_sound_effect(snd)
+
+    def play_deafen_chime(self, is_deafened: bool):
+        snd = generate_deafen_sound() if is_deafened else generate_undeafen_sound()
+        self.play_sound_effect(snd)
 
     def start_ringtone(self, ringtone_type: str = "incoming"):
         with self._lock:

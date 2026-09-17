@@ -32,7 +32,7 @@ class ServerNavBar(QWidget):
 
         # 1. Direct Messages Button (Discord Home / @me)
         self.dm_btn = QPushButton("💬")
-        self.dm_btn.setToolTip("Личные сообщения и друзья")
+        self.dm_btn.setToolTip("Direct Messages & Friends")
         self.dm_btn.setFixedSize(48, 48)
         self.dm_btn.setStyleSheet("""
             QPushButton {
@@ -75,7 +75,7 @@ class ServerNavBar(QWidget):
 
         # 3. Add Server Button (+)
         self.add_btn = QPushButton("+")
-        self.add_btn.setToolTip("Создать сервер (комнату)")
+        self.add_btn.setToolTip("Add a Server")
         self.add_btn.setFixedSize(48, 48)
         self.add_btn.setStyleSheet("""
             QPushButton {
@@ -112,11 +112,11 @@ class ServerNavBar(QWidget):
 
     def add_room_button(self, room: Dict[str, Any]):
         r_id = room.get("room_id")
-        r_name = room.get("name", "Сервер")
+        r_name = room.get("name", "Server")
         
         # Make initials
         words = r_name.split()
-        initials = "".join([w[0].upper() for w in words[:2]]) if words else "С"
+        initials = "".join([w[0].upper() for w in words[:2]]) if words else "S"
 
         btn = QPushButton(initials)
         btn.setToolTip(r_name)

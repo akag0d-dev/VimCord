@@ -55,7 +55,7 @@ class MemberItemWidget(QWidget):
         display_status = self.status_text
         if not self.is_online:
             if not display_status or display_status in ("В сети", "Online"):
-                display_status = "Не в сети"
+                display_status = "Offline"
 
         if display_status:
             self.status_label = QLabel(display_status)
@@ -162,7 +162,7 @@ class MemberListWidget(QWidget):
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         
-        self.title_label = QLabel("УЧАСТНИКИ")
+        self.title_label = QLabel("MEMBERS")
         self.title_label.setStyleSheet("color: #949ba4; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
         h_layout.addWidget(self.title_label)
         main_layout.addWidget(header)
@@ -231,7 +231,7 @@ class MemberListWidget(QWidget):
 
         # 1. Online Section
         if online_members:
-            sec_label = QLabel(f"В СЕТИ — {len(online_members)}")
+            sec_label = QLabel(f"ONLINE — {len(online_members)}")
             sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: 700; padding: 6px 8px 4px 8px;")
             self.content_layout.addWidget(sec_label)
 
@@ -243,7 +243,7 @@ class MemberListWidget(QWidget):
 
         # 2. Offline Section
         if offline_members:
-            sec_label = QLabel(f"НЕ В СЕТИ — {len(offline_members)}")
+            sec_label = QLabel(f"OFFLINE — {len(offline_members)}")
             sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: 700; padding: 12px 8px 4px 8px;")
             self.content_layout.addWidget(sec_label)
 
@@ -253,7 +253,7 @@ class MemberListWidget(QWidget):
                 item_w.right_clicked.connect(self._on_member_right_clicked)
                 self.content_layout.addWidget(item_w)
 
-        self.title_label.setText(f"УЧАСТНИКИ ({len(self.members)})")
+        self.title_label.setText(f"MEMBERS ({len(self.members)})")
 
     def _on_member_clicked(self, user_id: str):
         self.view_profile_requested.emit(user_id)
@@ -283,23 +283,23 @@ class MemberListWidget(QWidget):
         """)
 
         # 1. Profile action
-        profile_action = menu.addAction("👤 Профиль")
+        profile_action = menu.addAction("👤 Profile")
         profile_action.triggered.connect(lambda: self.view_profile_requested.emit(user_id))
 
         # Only offer DM and Call if not self
         if user_id != self.current_user_id:
             menu.addSeparator()
-            dm_action = menu.addAction("💬 Написать сообщение")
+            dm_action = menu.addAction("💬 Message")
             dm_action.triggered.connect(lambda: self.open_dm_requested.emit(user_id, user_info["username"]))
 
-            call_action = menu.addAction("📞 Позвонить")
+            call_action = menu.addAction("📞 Call")
             call_action.triggered.connect(lambda: self.call_requested.emit(user_id))
 
             menu.addSeparator()
 
             # Local mute toggle
             is_muted = user_id in self.peer_muted
-            mute_text = "🔊 Включить звук пользователя" if is_muted else "🔇 Заглушить пользователя"
+            mute_text = "🔊 Unmute User" if is_muted else "🔇 Mute User"
             mute_action = menu.addAction(mute_text)
             mute_action.triggered.connect(lambda: self._toggle_peer_mute(user_id))
 
@@ -316,7 +316,7 @@ class MemberListWidget(QWidget):
             current_pct = int(round(self.peer_volumes.get(user_id, 1.0) * 100))
 
             header_box = QHBoxLayout()
-            vol_title = QLabel("ГРОМКОСТЬ ПОЛЬЗОВАТЕЛЯ")
+            vol_title = QLabel("USER VOLUME")
             vol_title.setStyleSheet("color: #949ba4; font-size: 10px; font-weight: bold; border: none;")
             vol_val_lbl = QLabel(f"{current_pct}%")
             vol_val_lbl.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold; border: none;")

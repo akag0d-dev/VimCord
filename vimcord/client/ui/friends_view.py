@@ -22,7 +22,7 @@ class FriendItemWidget(QWidget):
         self.peer_id = friend_data.get("peer_id", "")
         self.username = friend_data.get("username", "User")
         self.avatar_color = friend_data.get("avatar_color", "#5865F2")
-        self.status_text = friend_data.get("status_text", "В сети")
+        self.status_text = friend_data.get("status_text", "Online")
         self.is_incoming = friend_data.get("is_incoming", False)
         self.is_outgoing = friend_data.get("is_outgoing", False)
         self.is_online = is_online
@@ -58,8 +58,8 @@ class FriendItemWidget(QWidget):
         name_lbl.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 14px;")
         info_layout.addWidget(name_lbl)
 
-        status_str = "В сети" if self.is_online else "Не в сети"
-        if self.status_text and self.status_text != "В сети":
+        status_str = "Online" if self.is_online else "Offline"
+        if self.status_text and self.status_text not in ("Online", "В сети"):
             status_str += f" — {self.status_text}"
         status_lbl = QLabel(status_str)
         status_color = "#23a55a" if self.is_online else "#80848e"
@@ -70,7 +70,7 @@ class FriendItemWidget(QWidget):
 
         # Action Buttons
         if self.is_incoming:
-            acc_btn = QPushButton("Принять ✔️")
+            acc_btn = QPushButton("Accept ✔️")
             acc_btn.setStyleSheet("""
                 background-color: #23a55a; color: white; font-weight: bold;
                 border-radius: 4px; padding: 6px 12px; border: none;
@@ -78,7 +78,7 @@ class FriendItemWidget(QWidget):
             acc_btn.clicked.connect(lambda: self.accept_clicked.emit(self.peer_id))
             layout.addWidget(acc_btn)
 
-            dec_btn = QPushButton("Отклонить ✖️")
+            dec_btn = QPushButton("Decline ✖️")
             dec_btn.setStyleSheet("""
                 background-color: #4e5058; color: white;
                 border-radius: 4px; padding: 6px 12px; border: none;
@@ -87,11 +87,11 @@ class FriendItemWidget(QWidget):
             layout.addWidget(dec_btn)
 
         elif self.is_outgoing:
-            pending_lbl = QLabel("Заявка отправлена...")
+            pending_lbl = QLabel("Friend Request Sent...")
             pending_lbl.setStyleSheet("color: #949ba4; font-size: 12px; font-style: italic;")
             layout.addWidget(pending_lbl)
 
-            cancel_btn = QPushButton("Отменить")
+            cancel_btn = QPushButton("Cancel")
             cancel_btn.setStyleSheet("""
                 background-color: #4e5058; color: white;
                 border-radius: 4px; padding: 6px 10px; border: none;
@@ -102,7 +102,7 @@ class FriendItemWidget(QWidget):
         else:
             # Accepted friend
             chat_btn = QPushButton("💬")
-            chat_btn.setToolTip("Написать сообщение")
+            chat_btn.setToolTip("Send Message")
             chat_btn.setFixedSize(36, 36)
             chat_btn.setStyleSheet("""
                 QPushButton {
@@ -119,7 +119,7 @@ class FriendItemWidget(QWidget):
             layout.addWidget(chat_btn)
 
             call_btn = QPushButton("📞")
-            call_btn.setToolTip("Позвонить лично")
+            call_btn.setToolTip("Start Call")
             call_btn.setFixedSize(36, 36)
             call_btn.setStyleSheet("""
                 QPushButton {
@@ -169,7 +169,7 @@ class FriendsView(QWidget):
         icon_lbl.setStyleSheet("font-size: 18px;")
         tb_layout.addWidget(icon_lbl)
 
-        title = QLabel("Друзья")
+        title = QLabel("Friends")
         title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 15px;")
         tb_layout.addWidget(title)
 
@@ -180,10 +180,10 @@ class FriendsView(QWidget):
         tb_layout.addWidget(sep)
 
         # Tab buttons
-        self.btn_online = QPushButton("В сети")
-        self.btn_all = QPushButton("Все")
-        self.btn_pending = QPushButton("Ожидание")
-        self.btn_add = QPushButton("Добавить в друзья")
+        self.btn_online = QPushButton("Online")
+        self.btn_all = QPushButton("All")
+        self.btn_pending = QPushButton("Pending")
+        self.btn_add = QPushButton("Add Friend")
 
         for b, tab in [
             (self.btn_online, "online"),
@@ -253,7 +253,7 @@ class FriendsView(QWidget):
         self.friends = friends
         # Update pending tab text with count
         pending_count = sum(1 for f in friends if f.get("is_incoming"))
-        self.btn_pending.setText(f"Ожидание ({pending_count})" if pending_count > 0 else "Ожидание")
+        self.btn_pending.setText(f"Pending ({pending_count})" if pending_count > 0 else "Pending")
         self._render_current_tab()
 
     def set_online_users(self, online_users: Dict[str, Dict[str, Any]]):
@@ -285,24 +285,24 @@ class FriendsView(QWidget):
 
         if self.current_tab == "online":
             online_friends = [f for f in accepted_friends if f.get("peer_id") in self.online_users and self.online_users[f.get("peer_id")].get("online", True)]
-            lbl = QLabel(f"В СЕТИ — {len(online_friends)}")
+            lbl = QLabel(f"ONLINE — {len(online_friends)}")
             lbl.setStyleSheet("color: #949ba4; font-size: 12px; font-weight: bold; margin-bottom: 8px;")
             self.content_layout.addWidget(lbl)
 
             if not online_friends:
-                self._render_empty_label("Никого из друзей нет в сети.")
+                self._render_empty_label("No friends are currently online.")
                 return
 
             for f in online_friends:
                 self._add_friend_item(f, is_online=True)
 
         elif self.current_tab == "all":
-            lbl = QLabel(f"ВСЕ ДРУЗЬЯ — {len(accepted_friends)}")
+            lbl = QLabel(f"ALL FRIENDS — {len(accepted_friends)}")
             lbl.setStyleSheet("color: #949ba4; font-size: 12px; font-weight: bold; margin-bottom: 8px;")
             self.content_layout.addWidget(lbl)
 
             if not accepted_friends:
-                self._render_empty_label("У вас пока нет добавленных друзей.")
+                self._render_empty_label("You have no friends added yet.")
                 return
 
             for f in accepted_friends:
@@ -311,12 +311,12 @@ class FriendsView(QWidget):
 
         elif self.current_tab == "pending":
             pending_list = [f for f in self.friends if f.get("friendship_status") == "pending"]
-            lbl = QLabel(f"ЗАПРОСЫ В ДРУЗЬЯ — {len(pending_list)}")
+            lbl = QLabel(f"PENDING REQUESTS — {len(pending_list)}")
             lbl.setStyleSheet("color: #949ba4; font-size: 12px; font-weight: bold; margin-bottom: 8px;")
             self.content_layout.addWidget(lbl)
 
             if not pending_list:
-                self._render_empty_label("Нет ожидающих запросов в друзья.")
+                self._render_empty_label("No pending friend requests.")
                 return
 
             for f in pending_list:
@@ -337,11 +337,11 @@ class FriendsView(QWidget):
         self.content_layout.addWidget(lbl)
 
     def _render_add_friend_view(self):
-        title = QLabel("ДОБАВИТЬ В ДРУЗЬЯ")
+        title = QLabel("ADD FRIEND")
         title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 16px;")
         self.content_layout.addWidget(title)
 
-        desc = QLabel("Вы можете отправить запрос в друзья любому пользователю VimCord, зная его имя.")
+        desc = QLabel("You can add friends with their VimCord username.")
         desc.setStyleSheet("color: #949ba4; font-size: 13px; margin-bottom: 12px;")
         self.content_layout.addWidget(desc)
 
@@ -351,12 +351,12 @@ class FriendsView(QWidget):
         ib_layout.setContentsMargins(6, 4, 6, 4)
 
         self.add_input = QLineEdit()
-        self.add_input.setPlaceholderText("Введите имя пользователя...")
+        self.add_input.setPlaceholderText("Enter a username...")
         self.add_input.setStyleSheet("background: transparent; border: none; color: #ffffff; font-size: 15px;")
         self.add_input.returnPressed.connect(self._on_send_request)
         ib_layout.addWidget(self.add_input, 1)
 
-        send_req_btn = QPushButton("Отправить запрос")
+        send_req_btn = QPushButton("Send Friend Request")
         send_req_btn.setStyleSheet("""
             background-color: #5865F2;
             color: #ffffff;

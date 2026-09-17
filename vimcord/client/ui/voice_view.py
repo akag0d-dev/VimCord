@@ -32,7 +32,7 @@ class VoiceUserWidget(QWidget):
 
         self.setFixedSize(110, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Нажмите для просмотра профиля")
+        self.setToolTip("Click to view profile")
         self._init_ui()
 
     def _init_ui(self):
@@ -171,15 +171,15 @@ class VoiceView(QWidget):
         icon.setStyleSheet("font-size: 18px;")
         sb_layout.addWidget(icon)
 
-        self.title_label = QLabel("Голос подключен")
+        self.title_label = QLabel("Voice Connected")
         self.title_label.setStyleSheet("color: #23a55a; font-weight: bold; font-size: 13px;")
         sb_layout.addWidget(self.title_label)
 
         sb_layout.addStretch(1)
 
         # Screen Share toggle button
-        self.screen_btn = QPushButton("🖥️ Экран")
-        self.screen_btn.setToolTip("Поделиться экраном (Screen Share)")
+        self.screen_btn = QPushButton("🖥️ Screen")
+        self.screen_btn.setToolTip("Share Screen")
         self.screen_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #dbdee1; font-weight: bold;
@@ -191,7 +191,7 @@ class VoiceView(QWidget):
         sb_layout.addWidget(self.screen_btn)
 
         # Disconnect button
-        self.disc_btn = QPushButton("Отключиться")
+        self.disc_btn = QPushButton("Disconnect")
         self.disc_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f23f43; color: #ffffff; font-weight: bold;
@@ -210,7 +210,7 @@ class VoiceView(QWidget):
         sc_layout = QVBoxLayout(self.screen_container)
         sc_layout.setContentsMargins(6, 6, 6, 6)
 
-        self.screen_title = QLabel("🖥️ Демонстрация экрана")
+        self.screen_title = QLabel("🖥️ Screen Share")
         self.screen_title.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold;")
         sc_layout.addWidget(self.screen_title)
 
@@ -231,11 +231,12 @@ class VoiceView(QWidget):
         self.grid_layout.setSpacing(12)
         self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        main_layout.addWidget(self.grid_container)
+        main_layout.addWidget(self.grid_container, 2)
 
     def set_channel_info(self, channel_name: str):
         self.channel_name = channel_name
-        self.title_label.setText(f"Подключено: {channel_name}")
+        self.current_channel_name = channel_name
+        self.title_label.setText(f"Connected: {channel_name}")
 
     def update_connection_info(self, ping_ms: int = 0, server_ip: str = "127.0.0.1", port: Optional[int] = None, *args, **kwargs):
         pass
@@ -294,14 +295,14 @@ class VoiceView(QWidget):
         """)
 
         # Profile
-        profile_action = menu.addAction("👤 Профиль")
+        profile_action = menu.addAction("👤 Profile")
         profile_action.triggered.connect(lambda: self.user_profile_requested.emit(user_info))
 
         # Only provide volume & mute for other users
         if user_id != self.current_user_id:
             menu.addSeparator()
             is_muted = user_id in self.peer_muted
-            mute_text = "🔊 Включить звук пользователя" if is_muted else "🔇 Заглушить для себя"
+            mute_text = "🔊 Unmute User" if is_muted else "🔇 Mute User"
             mute_action = menu.addAction(mute_text)
             mute_action.triggered.connect(lambda: self._toggle_peer_mute(user_id))
 
@@ -318,7 +319,7 @@ class VoiceView(QWidget):
             current_pct = int(round(self.peer_volumes.get(user_id, 1.0) * 100))
 
             header_box = QHBoxLayout()
-            vol_title = QLabel("ГРОМКОСТЬ ПОЛЬЗОВАТЕЛЯ")
+            vol_title = QLabel("USER VOLUME")
             vol_title.setStyleSheet("color: #949ba4; font-size: 10px; font-weight: bold; border: none;")
             vol_val_lbl = QLabel(f"{current_pct}%")
             vol_val_lbl.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold; border: none;")
@@ -387,7 +388,7 @@ class VoiceView(QWidget):
     def _toggle_screen_share(self):
         self.is_screen_sharing = not self.is_screen_sharing
         if self.is_screen_sharing:
-            self.screen_btn.setText("🔴 Остановить экран")
+            self.screen_btn.setText("🔴 Stop Screen")
             self.screen_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #f23f43; color: white; font-weight: bold;
@@ -395,7 +396,7 @@ class VoiceView(QWidget):
                 }
             """)
         else:
-            self.screen_btn.setText("🖥️ Экран")
+            self.screen_btn.setText("🖥️ Screen")
             self.screen_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #35373c; color: #dbdee1; font-weight: bold;
@@ -411,7 +412,7 @@ class VoiceView(QWidget):
         """Renders received screen share JPEG frame onto the viewport."""
         pixmap = QPixmap()
         if pixmap.loadFromData(jpeg_data, "JPEG"):
-            self.screen_title.setText(f"🖥️ Экран пользователя: {sender_name}")
+            self.screen_title.setText(f"🖥️ {sender_name}'s Screen")
             scaled = pixmap.scaled(
                 self.screen_display.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,

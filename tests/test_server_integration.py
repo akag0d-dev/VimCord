@@ -77,11 +77,9 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         w_a.write(encode_json_message({"type": "create_room", "name": "Комната Алисы"}))
         await w_a.drain()
         
-        # Both should receive room_created
+        # Creator receives room_created
         room_a = await self._read_json(r_a)
-        room_b = await self._read_json(r_b)
         self.assertEqual(room_a["type"], "room_created")
-        self.assertEqual(room_b["type"], "room_created")
         alice_room_id = room_a["room"]["room_id"]
 
         # 4. Alice creates a voice channel
@@ -93,7 +91,6 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         }))
         await w_a.drain()
         ch_a = await self._read_json(r_a)
-        ch_b = await self._read_json(r_b)
         self.assertEqual(ch_a["type"], "channel_created")
         voice_ch_id = ch_a["channel"]["channel_id"]
 
@@ -107,6 +104,7 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         v_upd_a = await self._read_json(r_a)
         v_upd_b = await self._read_json(r_b)
         self.assertEqual(v_upd_a["type"], "voice_state_update")
+        self.assertEqual(v_upd_b["type"], "voice_state_update")
         self.assertEqual(v_upd_a["action"], "join")
 
         # 6. Text message sending and history retrieval
