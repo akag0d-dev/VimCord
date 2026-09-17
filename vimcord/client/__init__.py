@@ -1,0 +1,3 @@
+"""
+Client package for VimCord.
+"""
