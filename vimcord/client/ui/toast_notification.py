@@ -93,7 +93,8 @@ class ToastNotification(QWidget):
         self._timer.start(duration_ms)
 
     def mousePressEvent(self, event):
-        if self.payload:
-            self.clicked.emit(self.payload)
-        self.hide()
         super().mousePressEvent(event)
+        if self.payload:
+            p = self.payload
+            self.hide()
+            self.clicked.emit(p)

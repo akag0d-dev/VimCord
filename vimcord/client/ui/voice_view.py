@@ -5,7 +5,7 @@ and supports live Screen Sharing (video stream view and screen share toggle).
 """
 
 from typing import Dict, List, Optional, Any
-from PyQt6.QtCore import Qt, pyqtSignal, QByteArray
+from PyQt6.QtCore import Qt, pyqtSignal, QByteArray, QTimer
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout, QScrollArea
@@ -105,15 +105,25 @@ class VoiceUserWidget(QWidget):
         self._update_badge()
 
     def mousePressEvent(self, event):
-        self.clicked.emit({
-            "user_id": self.user_id,
-            "username": self.username,
-            "avatar_color": self.avatar_color,
-            "avatar_image": self.avatar_image,
-            "is_muted": self.is_muted,
-            "is_deafened": self.is_deafened
-        })
         super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            data = {
+                "user_id": self.user_id,
+                "username": self.username,
+                "avatar_color": self.avatar_color,
+                "avatar_image": self.avatar_image,
+                "is_muted": self.is_muted,
+                "is_deafened": self.is_deafened
+            }
+            # Emit asynchronously so that if opening a modal / switching calls
+            # deletes this widget, it does not crash on a deleted C++ pointer
+            QTimer.singleShot(0, lambda: self._safe_emit_clicked(data))
+
+    def _safe_emit_clicked(self, data: dict):
+        try:
+            self.clicked.emit(data)
+        except RuntimeError:
+            pass
 
 
 class VoiceView(QWidget):
