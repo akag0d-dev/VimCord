@@ -10,8 +10,10 @@ from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSlider, QProgressBar, QStackedWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QFileDialog,
-    QRadioButton, QCheckBox, QScrollArea
+    QRadioButton, QCheckBox, QScrollArea, QButtonGroup
 )
+import json
+from pathlib import Path
 import base64
 from vimcord.client.audio.audio_manager import AudioManager
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
@@ -23,6 +25,8 @@ class SettingsDialog(QDialog):
     logout_requested = pyqtSignal()
     screen_settings_changed = pyqtSignal(str, int, int)     # resolution, fps, quality
     ptt_settings_changed = pyqtSignal(bool, str)            # ptt_mode, ptt_key
+    theme_changed = pyqtSignal(str)                         # "dark", "amoled", "light"
+    language_changed = pyqtSignal(str)                      # "ru", "en"
 
     DISCORD_COLORS = [
         ("#5865F2", "Blurple"),
@@ -46,6 +50,18 @@ class SettingsDialog(QDialog):
         self.avatar_image = user_data.get("avatar_image", "")
         self.bio = user_data.get("bio", "")
         self.selected_color = self.avatar_color
+
+        self.current_theme = "dark"
+        self.current_language = "ru"
+        try:
+            cfg_path = Path.home() / ".vimcord_client.json"
+            if cfg_path.exists():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    _c = json.load(f)
+                    self.current_theme = _c.get("theme", "dark")
+                    self.current_language = _c.get("language", "ru")
+        except Exception:
+            pass
 
         self.ptt_mode = getattr(self.audio_manager, "ptt_mode", False)
         self.ptt_key = getattr(parent, "ptt_key", "Space") if parent else "Space"
@@ -572,27 +588,119 @@ class SettingsDialog(QDialog):
     # ------------------ Page 3: Appearance ------------------
 
     def _create_appearance_page(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background-color: #313338; }")
+
         w = QWidget()
         layout = QVBoxLayout(w)
         layout.setContentsMargins(30, 24, 30, 24)
-        layout.setSpacing(14)
+        layout.setSpacing(16)
 
-        title = QLabel("Внешний вид")
+        # 1. Theme Section
+        title = QLabel("🎨 Внешний вид и Тема")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(title)
 
-        desc = QLabel("Тема интерфейса: Тёмная (Discord Dark).")
-        desc.setStyleSheet("color: #dbdee1; font-size: 14px;")
-        layout.addWidget(desc)
+        theme_desc = QLabel("Выберите тему оформления приложения:")
+        theme_desc.setStyleSheet("color: #949ba4; font-size: 13px;")
+        layout.addWidget(theme_desc)
 
-        theme_card = QWidget()
-        theme_card.setStyleSheet("background-color: #1e1f22; border: 2px solid #5865F2; border-radius: 8px; padding: 16px;")
-        tc_layout = QVBoxLayout(theme_card)
-        tc_layout.addWidget(QLabel("✔ Тёмная тема активна (Discord Dark #313338 / #1e1f22)"))
-        layout.addWidget(theme_card)
+        self.theme_group = QButtonGroup(self)
+
+        themes = [
+            ("dark", "🌙 Тёмная (Discord Dark)", "Стандартная классическая тема Discord"),
+            ("amoled", "🖤 Очень тёмная (AMOLED / Pure Black)", "Глубокий чёрный цвет #000000 для максимального контраста"),
+            ("light", "☀️ Светлая (Discord Light)", "Светлая тема интерфейса")
+        ]
+
+        for key, name, desc in themes:
+            card = QWidget()
+            card.setStyleSheet("""
+                QWidget {
+                    background-color: #2b2d31;
+                    border: 1px solid #383a40;
+                    border-radius: 8px;
+                }
+            """)
+            c_layout = QHBoxLayout(card)
+            c_layout.setContentsMargins(14, 10, 14, 10)
+
+            radio = QRadioButton(name)
+            radio.setProperty("theme_key", key)
+            radio.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 14px;")
+            if self.current_theme == key or (key == "dark" and self.current_theme not in ("amoled", "light")):
+                radio.setChecked(True)
+            self.theme_group.addButton(radio)
+            c_layout.addWidget(radio)
+
+            sub_lbl = QLabel(desc)
+            sub_lbl.setStyleSheet("color: #949ba4; font-size: 12px; margin-left: 10px;")
+            c_layout.addWidget(sub_lbl, 1)
+
+            layout.addWidget(card)
+
+        self.theme_group.buttonToggled.connect(self._on_theme_toggled)
+
+        # 2. Language Section
+        lang_title = QLabel("🌐 Язык интерфейса (Language)")
+        lang_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff; margin-top: 14px;")
+        layout.addWidget(lang_title)
+
+        lang_desc = QLabel("Выберите предпочитаемый язык системы:")
+        lang_desc.setStyleSheet("color: #949ba4; font-size: 13px;")
+        layout.addWidget(lang_desc)
+
+        self.lang_combo = QComboBox()
+        self.lang_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1e1f22;
+                color: #ffffff;
+                border: 1px solid #383a40;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-size: 14px;
+                min-height: 24px;
+            }
+        """)
+        self.lang_combo.addItem("🇷🇺 Русский (Russian)", "ru")
+        self.lang_combo.addItem("🇬🇧 English (Английский)", "en")
+
+        idx = 1 if self.current_language == "en" else 0
+        self.lang_combo.setCurrentIndex(idx)
+        self.lang_combo.currentIndexChanged.connect(self._on_language_changed)
+        layout.addWidget(self.lang_combo)
 
         layout.addStretch(1)
-        return w
+        scroll.setWidget(w)
+        return scroll
+
+    def _on_theme_toggled(self, button: QRadioButton, checked: bool):
+        if checked:
+            theme_key = button.property("theme_key")
+            self.current_theme = theme_key
+            self.theme_changed.emit(theme_key)
+            self._save_theme_and_lang()
+
+    def _on_language_changed(self, index: int):
+        lang_key = self.lang_combo.currentData()
+        self.current_language = lang_key
+        self.language_changed.emit(lang_key)
+        self._save_theme_and_lang()
+
+    def _save_theme_and_lang(self):
+        try:
+            cfg_path = Path.home() / ".vimcord_client.json"
+            cfg = {}
+            if cfg_path.exists():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            cfg["theme"] = self.current_theme
+            cfg["language"] = self.current_language
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def _on_category_changed(self, row: int):
         self.pages.setCurrentIndex(row)

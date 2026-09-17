@@ -175,18 +175,6 @@ class VoiceView(QWidget):
         self.title_label.setStyleSheet("color: #23a55a; font-weight: bold; font-size: 13px;")
         sb_layout.addWidget(self.title_label)
 
-        # Ping & server IP indicator
-        self.connection_label = QLabel("🟢 RTC | Ping: -- ms | IP: --")
-        self.connection_label.setStyleSheet("""
-            color: #949ba4;
-            font-size: 11px;
-            font-family: monospace;
-            background-color: #1a1b1e;
-            padding: 3px 8px;
-            border-radius: 4px;
-        """)
-        sb_layout.addWidget(self.connection_label)
-
         sb_layout.addStretch(1)
 
         # Screen Share toggle button
@@ -250,12 +238,7 @@ class VoiceView(QWidget):
         self.title_label.setText(f"Подключено: {channel_name}")
 
     def update_connection_info(self, ping_ms: int = 0, server_ip: str = "127.0.0.1", port: Optional[int] = None, *args, **kwargs):
-        addr_str = f"{server_ip}:{port}" if port else str(server_ip)
-        if ping_ms > 0:
-            dot = "🟢" if ping_ms < 60 else ("🟡" if ping_ms < 150 else "🔴")
-            self.connection_label.setText(f"{dot} {ping_ms} ms | IP: {addr_str}")
-        else:
-            self.connection_label.setText(f"🟢 Подключено | IP: {addr_str}")
+        pass
 
     def update_participants(self, users: List[Dict[str, Any]]):
         for w in self.user_widgets.values():

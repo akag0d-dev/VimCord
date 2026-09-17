@@ -216,6 +216,7 @@ class ChatView(QWidget):
             }
         """)
         self.voice_btn.clicked.connect(self._toggle_voice_recording)
+        self.voice_btn.hide()  # Hidden per user request, code preserved
         in_layout.addWidget(self.voice_btn)
 
         # Send button
@@ -248,6 +249,7 @@ class ChatView(QWidget):
         self.title_icon.setText(prefix)
         self.title_label.setText(title)
         self.msg_input.setPlaceholderText(f"Написать в {prefix}{title}")
+        self.members_btn.setVisible(is_channel)
 
         # Render cached messages for this target
         self._render_history()
@@ -365,7 +367,9 @@ class ChatView(QWidget):
                     self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, img_url, qimg)
                     image_html = f"""
                     <div style='margin-top: 6px;'>
-                        <img src='res://img/{img_key}.jpg' width='{qimg.width()}' height='{qimg.height()}' />
+                        <a href='view_image:{msg_id}' style='text-decoration: none;' title='Нажмите, чтобы открыть'>
+                            <img src='res://img/{img_key}.jpg' width='{qimg.width()}' height='{qimg.height()}' style='border-radius: 6px;' />
+                        </a>
                     </div>
                     """
             except Exception:
@@ -414,6 +418,17 @@ class ChatView(QWidget):
             msg_id = url_str.removeprefix("delete:")
             target_type = "channel" if self.is_channel else "dm"
             self.delete_message_requested.emit(msg_id, target_type, self.current_target_id)
+        elif url_str.startswith("view_image:"):
+            msg_id = url_str.removeprefix("view_image:")
+            messages = self.message_cache.get(self.current_target_id, [])
+            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+            if msg and msg.get("image_data"):
+                try:
+                    from vimcord.client.ui.image_viewer import ImageViewerModal
+                    dlg = ImageViewerModal(msg["image_data"], self)
+                    dlg.exec()
+                except Exception as e:
+                    logger.error(f"Error opening image modal: {e}")
         elif url_str.startswith("play_voice:"):
             msg_id = url_str.removeprefix("play_voice:")
             messages = self.message_cache.get(self.current_target_id, [])
@@ -423,7 +438,7 @@ class ChatView(QWidget):
                     self.audio_manager.play_voice_msg(msg["voice_data"], float(msg.get("voice_duration", 0.0)))
                 else:
                     self.play_voice_requested.emit(msg["voice_data"])
-        else:
+        elif url.scheme() in ("http", "https"):
             QDesktopServices.openUrl(url)
 
     def _on_choose_attachment(self):

@@ -26,7 +26,11 @@ UDP_TYPE_CHANNEL_AUDIO = 2 # Audio for a room voice channel
 UDP_TYPE_DM_AUDIO = 3      # Audio for 1-on-1 direct call
 UDP_TYPE_PING = 4          # UDP Keep-alive / ping
 UDP_TYPE_SPEAKING = 5      # VAD speaking state notification (lightweight)
-UDP_TYPE_SCREEN_FRAME = 6 # Screen share JPEG frame payload
+UDP_TYPE_SCREEN_FRAME = 6 # Screen share JPEG frame payload (legacy single packet)
+UDP_TYPE_SCREEN_CHUNK = 7 # Fragmented high-res screen share chunk (1080p/720p 30fps)
+
+SCREEN_CHUNK_HEADER_FORMAT = "!IHH"
+SCREEN_CHUNK_HEADER_SIZE = struct.calcsize(SCREEN_CHUNK_HEADER_FORMAT)  # 4 + 2 + 2 = 8 bytes
 
 
 def get_dm_chat_key(user_a: str, user_b: str) -> str:
@@ -89,6 +93,35 @@ def unpack_udp_audio(data: bytes) -> Optional[Tuple[int, int, str, str, bytes]]:
     payload = data[offset:]
     
     return pkt_type, seq, sender_id, target_id, payload
+
+
+def pack_screen_chunk(
+    seq: int,
+    sender_id: str,
+    target_id: str,
+    frame_id: int,
+    chunk_idx: int,
+    total_chunks: int,
+    chunk_data: bytes
+) -> bytes:
+    """Serializes a fragmented high-res screen share chunk for UDP transport."""
+    chunk_hdr = struct.pack(SCREEN_CHUNK_HEADER_FORMAT, frame_id % (2**32), chunk_idx, total_chunks)
+    return pack_udp_audio(
+        pkt_type=UDP_TYPE_SCREEN_CHUNK,
+        seq=seq,
+        sender_id=sender_id,
+        target_id=target_id,
+        payload=chunk_hdr + chunk_data
+    )
+
+
+def unpack_screen_chunk(payload: bytes) -> Optional[Tuple[int, int, int, bytes]]:
+    """Unpacks (frame_id, chunk_idx, total_chunks, chunk_data) from a screen chunk payload."""
+    if len(payload) < SCREEN_CHUNK_HEADER_SIZE:
+        return None
+    frame_id, chunk_idx, total_chunks = struct.unpack_from(SCREEN_CHUNK_HEADER_FORMAT, payload, 0)
+    chunk_data = payload[SCREEN_CHUNK_HEADER_SIZE:]
+    return frame_id, chunk_idx, total_chunks, chunk_data
 
 
 def encode_json_message(msg: Dict[str, Any]) -> bytes:

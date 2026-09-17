@@ -304,4 +304,27 @@ class ServerState:
         return [room.to_dict() for room in self.rooms.values()]
 
     def get_all_users_dict(self) -> List[Dict[str, Any]]:
-        return [user.to_dict() for user in self.users.values()]
+        db_users = self.db.get_all_users()
+        user_map = {}
+        for du in db_users:
+            uid = du["user_id"]
+            user_map[uid] = {
+                "user_id": uid,
+                "username": du["username"],
+                "avatar_color": du.get("avatar_color", "#5865F2"),
+                "avatar_image": du.get("avatar_image", ""),
+                "bio": du.get("bio", ""),
+                "status_text": du.get("status_text", "Не в сети"),
+                "current_room_id": None,
+                "current_voice_channel_id": None,
+                "in_call": False,
+                "is_muted": False,
+                "is_deafened": False,
+                "online": False
+            }
+
+        # Override with active online user sessions
+        for uid, user in self.users.items():
+            user_map[uid] = user.to_dict()
+
+        return list(user_map.values())

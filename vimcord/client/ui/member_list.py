@@ -52,8 +52,13 @@ class MemberItemWidget(QWidget):
         self.name_label.setStyleSheet(f"color: {name_color}; font-weight: 600; font-size: 13px;")
         text_layout.addWidget(self.name_label)
 
-        if self.status_text:
-            self.status_label = QLabel(self.status_text)
+        display_status = self.status_text
+        if not self.is_online:
+            if not display_status or display_status in ("В сети", "Online"):
+                display_status = "Не в сети"
+
+        if display_status:
+            self.status_label = QLabel(display_status)
             self.status_label.setStyleSheet("color: #949ba4; font-size: 11px;")
             text_layout.addWidget(self.status_label)
 

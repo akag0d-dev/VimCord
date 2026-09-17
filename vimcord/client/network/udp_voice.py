@@ -17,7 +17,10 @@ from vimcord.common.protocol import (
     UDP_TYPE_DM_AUDIO,
     UDP_TYPE_PING,
     UDP_TYPE_SPEAKING,
-    UDP_TYPE_SCREEN_FRAME
+    UDP_TYPE_SCREEN_FRAME,
+    UDP_TYPE_SCREEN_CHUNK,
+    pack_screen_chunk,
+    unpack_screen_chunk
 )
 from vimcord.client.audio.audio_manager import AudioManager
 
@@ -51,6 +54,10 @@ class UDPVoiceClient:
         # Track active speakers for decay
         self._speaker_last_seen = {}
         self._speaker_decay_thread: Optional[threading.Thread] = None
+
+        # Screen share frame fragmentation & assembly
+        self._screen_frame_id: int = 0
+        self._screen_reassembler: dict = {}
 
         # Bind audio manager's mic capture to our send_mic_frame
         self.audio_manager.on_mic_frame = self._on_mic_frame
@@ -156,6 +163,34 @@ class UDPVoiceClient:
     def send_screen_packet(self, data: bytes):
         self._send_raw(data)
 
+    def send_screen_frame_chunks(self, target_id: str, jpeg_data: bytes):
+        """Slices JPEG data into MTU-safe 1200-byte UDP datagram chunks and transmits them."""
+        if not self._is_running or not self.sock or not self.user_id:
+            return
+        chunk_size = 1200
+        total_len = len(jpeg_data)
+        total_chunks = (total_len + chunk_size - 1) // chunk_size
+        if total_chunks == 0:
+            return
+
+        self._screen_frame_id = (self._screen_frame_id + 1) % (2**32)
+        fid = self._screen_frame_id
+
+        for idx in range(total_chunks):
+            start = idx * chunk_size
+            end = min(start + chunk_size, total_len)
+            chunk = jpeg_data[start:end]
+            pkt = pack_screen_chunk(
+                seq=self._next_seq(),
+                sender_id=self.user_id,
+                target_id=target_id,
+                frame_id=fid,
+                chunk_idx=idx,
+                total_chunks=total_chunks,
+                chunk_data=chunk
+            )
+            self._send_raw(pkt)
+
     def _receive_loop(self):
         """Receives incoming audio and screen packets from server and buffers them."""
         while self._is_running and self.sock:
@@ -179,6 +214,31 @@ class UDPVoiceClient:
                 elif pkt_type == UDP_TYPE_SCREEN_FRAME:
                     if payload and sender_id != self.user_id:
                         self.signals.screen_frame_received.emit(sender_id, payload)
+
+                elif pkt_type == UDP_TYPE_SCREEN_CHUNK:
+                    if payload and sender_id != self.user_id:
+                        unpacked = unpack_screen_chunk(payload)
+                        if unpacked:
+                            frame_id, chunk_idx, total_chunks, chunk_data = unpacked
+                            key = (sender_id, frame_id)
+                            now = time.time()
+                            if key not in self._screen_reassembler:
+                                # Clean up aged incomplete frames (> 2.0s)
+                                stale = [k for k, v in self._screen_reassembler.items() if now - v["timestamp"] > 2.0]
+                                for k in stale:
+                                    self._screen_reassembler.pop(k, None)
+                                self._screen_reassembler[key] = {
+                                    "total": total_chunks,
+                                    "chunks": {},
+                                    "timestamp": now
+                                }
+
+                            entry = self._screen_reassembler[key]
+                            entry["chunks"][chunk_idx] = chunk_data
+                            if len(entry["chunks"]) == entry["total"]:
+                                full_jpeg = b"".join(entry["chunks"][i] for i in range(entry["total"]))
+                                self._screen_reassembler.pop(key, None)
+                                self.signals.screen_frame_received.emit(sender_id, full_jpeg)
 
             except Exception as e:
                 if self._is_running:

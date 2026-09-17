@@ -304,6 +304,34 @@ class Database:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        """Returns all registered users from the database."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio, created_at FROM users ORDER BY username ASC")
+            rows = cur.fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        """Deletes a user and related memberships/friendships from the database."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            cur.execute("DELETE FROM room_members WHERE user_id = ?", (user_id,))
+            cur.execute("DELETE FROM friendships WHERE user_id = ? OR friend_id = ?", (user_id, user_id))
+            conn.commit()
+            return True
+
+    def admin_set_password(self, user_id: str, new_pass: str) -> bool:
+        """Sets a new password for a user without requiring old password (admin tool)."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            salt = secrets.token_hex(16)
+            p_hash = self._hash_password(new_pass, salt)
+            cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE user_id = ?", (p_hash, salt, user_id))
+            conn.commit()
+            return cur.rowcount > 0
+
     # ------------------ Persistent Messages ------------------
 
     @staticmethod

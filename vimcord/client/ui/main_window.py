@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._bind_signals()
+        self._apply_saved_theme()
 
     def _load_app_icon(self) -> QIcon:
         icon_path = Path(__file__).resolve().parents[3] / "icon.ico"
@@ -685,20 +686,9 @@ class MainWindow(QMainWindow):
             self.screen_share_window.hide()
 
     def _send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
-        # 1. Guaranteed TCP delivery (immune to router/NAT packet size drops)
-        self.tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
-
-        # 2. Fast UDP delivery (low-latency when network supports it, max 60000 bytes)
-        if len(jpeg_data) <= 60000:
-            self._screen_seq = (self._screen_seq + 1) % (2**32)
-            pkt = pack_udp_audio(
-                pkt_type=UDP_TYPE_SCREEN_FRAME,
-                seq=self._screen_seq,
-                sender_id=self.my_user_id,
-                target_id=target_id,
-                payload=jpeg_data
-            )
-            self.udp_voice.send_screen_packet(pkt)
+        # 100% UDP transmission with 1200-byte datagram chunks (Discord architecture)
+        # Bypasses MTU limits without WinError 10040 and prevents TCP socket buffer choke
+        self.udp_voice.send_screen_frame_chunks(target_id, jpeg_data)
 
     def _on_local_screen_frame(self, jpeg_data: bytes):
         pixmap = QPixmap()
@@ -905,8 +895,35 @@ class MainWindow(QMainWindow):
         dlg.password_changed.connect(lambda op, np: self.tcp_client.send_change_password(op, np))
         dlg.screen_settings_changed.connect(lambda res, fps, q: self.screen_capturer.set_stream_settings(res, fps, q))
         dlg.ptt_settings_changed.connect(self._on_ptt_settings_changed)
+        dlg.theme_changed.connect(self._on_theme_changed)
         dlg.logout_requested.connect(self._on_logout_requested)
         dlg.exec()
+
+    def _apply_saved_theme(self):
+        try:
+            import json
+            from pathlib import Path
+            from vimcord.client.ui.styles import get_theme_qss
+            cfg_path = Path.home() / ".vimcord_client.json"
+            if cfg_path.exists():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    theme = cfg.get("theme", "dark")
+                    app = QApplication.instance()
+                    if app:
+                        app.setStyleSheet(get_theme_qss(theme))
+                    else:
+                        self.setStyleSheet(get_theme_qss(theme))
+        except Exception:
+            pass
+
+    def _on_theme_changed(self, theme_name: str):
+        from vimcord.client.ui.styles import get_theme_qss
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(get_theme_qss(theme_name))
+        else:
+            self.setStyleSheet(get_theme_qss(theme_name))
 
     def _on_ptt_settings_changed(self, is_ptt: bool, hotkey: str):
         self.audio_manager.set_ptt_mode(is_ptt)
@@ -1025,13 +1042,16 @@ class MainWindow(QMainWindow):
         uid = user_dict.get("user_id")
         if not uid:
             return
-        if user_dict.get("online", True):
+        is_online = user_dict.get("online", True)
+        if uid not in self.users:
             self.users[uid] = user_dict
         else:
-            self.users.pop(uid, None)
-        
+            self.users[uid].update(user_dict)
+        self.users[uid]["online"] = is_online
+
         self.channel_list.update_users(list(self.users.values()))
         self.friends_view.set_online_users(self.users)
+        self.member_list.update_presence(uid, is_online, user_dict.get("status_text"))
         if self.current_room_id:
             self.tcp_client.send_get_room_members(self.current_room_id)
 

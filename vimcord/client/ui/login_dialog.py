@@ -189,6 +189,9 @@ class LoginDialog(QDialog):
         if not uname:
             QMessageBox.warning(self, "Ошибка", "Введите имя пользователя!")
             return
+        if not passwd:
+            QMessageBox.warning(self, "Ошибка", "Введите пароль!")
+            return
         if not host:
             QMessageBox.warning(self, "Ошибка", "Укажите адрес сервера!")
             return

@@ -105,17 +105,17 @@ class TCPServer:
                 # 2. LOGIN
                 elif msg_type == "login":
                     uname = msg.get("username", "Anonymous").strip() or "Anonymous"
-                    passwd = msg.get("password", "")
-                    
-                    if passwd:
-                        ok, err_msg, u_data = self.db.authenticate_user(uname, passwd)
-                    else:
-                        # Auto-login or test compatibility: get existing or register with empty password
-                        existing = self.db.get_user_by_username(uname)
-                        if existing:
-                            ok, err_msg, u_data = True, "OK", existing
-                        else:
-                            ok, err_msg, u_data = self.db.register_user(uname, "password123")
+                    if not uname or not passwd:
+                        resp = {
+                            "type": "login_resp",
+                            "success": False,
+                            "message": "Требуется логин и пароль"
+                        }
+                        writer.write(encode_json_message(resp))
+                        await writer.drain()
+                        continue
+
+                    ok, err_msg, u_data = self.db.authenticate_user(uname, passwd)
 
                     if not ok:
                         resp = {
@@ -670,6 +670,10 @@ class TCPServer:
                     "user": {
                         "user_id": current_user.user_id,
                         "username": current_user.username,
+                        "status_text": "Не в сети",
+                        "avatar_color": current_user.avatar_color,
+                        "avatar_image": current_user.avatar_image,
+                        "bio": current_user.bio,
                         "online": False
                     }
                 })
@@ -680,7 +684,7 @@ class TCPServer:
                 pass
 
     async def start(self):
-        self.server = await asyncio.start_server(self.handle_client, self.host, self.port)
+        self.server = await asyncio.start_server(self.handle_client, self.host, self.port, limit=16 * 1024 * 1024)
         logger.info(f"TCP Control Server running on {self.host}:{self.port}")
         async with self.server:
             await self.server.serve_forever()
