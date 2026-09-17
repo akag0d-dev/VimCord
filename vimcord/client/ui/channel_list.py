@@ -1,12 +1,12 @@
 """
-Sidebar widget displaying channels (in room mode) or friends/users (in DM mode).
+Sidebar widget displaying channels (in room mode) or friends and DM chats (in DM mode).
 """
 
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QInputDialog, QMessageBox
+    QScrollArea, QFrame, QMessageBox
 )
 
 
@@ -15,8 +15,10 @@ class ChannelListWidget(QWidget):
     voice_channel_selected = pyqtSignal(str, str, str)  # room_id, channel_id, name
     create_channel_requested = pyqtSignal(str)          # room_id
     delete_room_requested = pyqtSignal(str)             # room_id
+    invite_room_requested = pyqtSignal(str)             # room_id
     dm_user_selected = pyqtSignal(str, str)             # user_id, username
     call_user_requested = pyqtSignal(str)               # user_id
+    friends_tab_selected = pyqtSignal()                 # Open friends view
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,45 +46,49 @@ class ChannelListWidget(QWidget):
         self.header_widget.setFixedHeight(48)
         self.header_widget.setStyleSheet("background-color: #2b2d31; border-bottom: 1px solid #1f2023;")
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(16, 0, 12, 0)
+        header_layout.setContentsMargins(16, 0, 8, 0)
+        header_layout.setSpacing(4)
 
         self.header_title = QLabel("Личные сообщения")
         self.header_title.setStyleSheet("font-weight: bold; font-size: 15px; color: #ffffff;")
         header_layout.addWidget(self.header_title, 1)
 
+        # Invite button (Room mode only)
+        self.invite_btn = QPushButton("🔗")
+        self.invite_btn.setToolTip("Создать ссылку-приглашение на сервер")
+        self.invite_btn.setFixedSize(26, 26)
+        self.invite_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; font-size: 14px; border: none; border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #35373c; }
+        """)
+        self.invite_btn.clicked.connect(self._on_invite_click)
+        header_layout.addWidget(self.invite_btn)
+
+        # Add Channel button (Room mode only)
         self.add_ch_btn = QPushButton("+")
         self.add_ch_btn.setToolTip("Создать канал")
         self.add_ch_btn.setFixedSize(26, 26)
         self.add_ch_btn.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #949ba4;
-                font-size: 18px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
+                background: transparent; color: #949ba4; font-size: 18px; font-weight: bold;
+                border: none; border-radius: 4px;
             }
-            QPushButton:hover {
-                background-color: #35373c;
-                color: #dbdee1;
-            }
+            QPushButton:hover { background-color: #35373c; color: #dbdee1; }
         """)
         self.add_ch_btn.clicked.connect(self._on_add_channel)
         header_layout.addWidget(self.add_ch_btn)
 
+        # Delete Room button (Custom rooms only)
         self.del_room_btn = QPushButton("🗑️")
         self.del_room_btn.setToolTip("Удалить сервер")
         self.del_room_btn.setFixedSize(26, 26)
         self.del_room_btn.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
+                background: transparent; font-size: 13px; border: none; border-radius: 4px;
             }
-            QPushButton:hover {
-                background-color: #35373c;
-            }
+            QPushButton:hover { background-color: #35373c; }
         """)
         self.del_room_btn.clicked.connect(self._on_delete_room)
         header_layout.addWidget(self.del_room_btn)
@@ -109,21 +115,20 @@ class ChannelListWidget(QWidget):
         self.my_user_id = user_id
 
     def show_dm_mode(self, users: List[Dict[str, Any]]):
-        """Switches sidebar to Direct Messages and user list."""
         self.current_mode = "@me"
         self.current_users_list = users
         self.header_title.setText("Личные сообщения")
+        self.invite_btn.hide()
         self.add_ch_btn.hide()
         self.del_room_btn.hide()
         self._render_dm_list()
 
     def show_room_mode(self, room: Dict[str, Any]):
-        """Switches sidebar to Room Channels list."""
         self.current_mode = room.get("room_id")
         self.current_room_data = room
         self.header_title.setText(room.get("name", "Сервер"))
+        self.invite_btn.show()
         self.add_ch_btn.show()
-        # Only show delete button for custom rooms
         self.del_room_btn.setVisible(room.get("room_id") != "room-default")
         self._render_room_channels()
 
@@ -143,13 +148,26 @@ class ChannelListWidget(QWidget):
     def _render_dm_list(self):
         self._clear_content()
 
-        sec_label = QLabel("ПОЛЬЗОВАТЕЛИ ОНЛАЙН")
-        sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 6px 8px;")
+        # "Друзья" Nav Button
+        friends_btn = QPushButton("👥  Друзья")
+        friends_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #35373c; color: #ffffff; font-weight: bold;
+                border-radius: 6px; padding: 10px 14px; text-align: left; border: none; font-size: 14px;
+            }
+            QPushButton:hover { background-color: #404249; }
+        """)
+        friends_btn.clicked.connect(self.friends_tab_selected.emit)
+        self.content_layout.addWidget(friends_btn)
+
+        # Section Header
+        sec_label = QLabel("ПРЯМЫЕ СООБЩЕНИЯ")
+        sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 14px 8px 4px 8px;")
         self.content_layout.addWidget(sec_label)
 
-        other_users = [u for u in self.current_users_list if u.get("user_id") != self.my_user_id and u.get("online", True)]
+        other_users = [u for u in self.current_users_list if u.get("user_id") != self.my_user_id]
         if not other_users:
-            empty_lbl = QLabel("Нет других пользователей в сети")
+            empty_lbl = QLabel("Нет других пользователей")
             empty_lbl.setStyleSheet("color: #80848e; font-size: 12px; padding: 8px;")
             self.content_layout.addWidget(empty_lbl)
             return
@@ -157,48 +175,39 @@ class ChannelListWidget(QWidget):
         for u in other_users:
             uid = u.get("user_id")
             uname = u.get("username", "User")
+            color = u.get("avatar_color", "#5865F2")
             in_call = u.get("in_call", False)
+            is_online = u.get("online", True)
 
             item_w = QWidget()
-            item_w.setStyleSheet("""
-                QWidget {
-                    background-color: transparent;
-                    border-radius: 4px;
-                }
-                QWidget:hover {
-                    background-color: #35373c;
-                }
+            is_selected = (uid == self.active_dm_user_id)
+            bg = "#404249" if is_selected else "transparent"
+            item_w.setStyleSheet(f"""
+                QWidget {{ background-color: {bg}; border-radius: 4px; }}
+                QWidget:hover {{ background-color: #35373c; }}
             """)
             i_layout = QHBoxLayout(item_w)
-            i_layout.setContentsMargins(8, 6, 8, 6)
+            i_layout.setContentsMargins(6, 4, 6, 4)
             i_layout.setSpacing(8)
 
-            # Online dot + Name
-            dot_color = "#f23f43" if in_call else "#23a55a"
+            # Avatar dot
+            dot_color = "#f23f43" if in_call else ("#23a55a" if is_online else "#80848e")
             dot = QLabel("●")
-            dot.setStyleSheet(f"color: {dot_color}; font-size: 14px;")
+            dot.setStyleSheet(f"color: {dot_color}; font-size: 13px;")
             i_layout.addWidget(dot)
 
             name_btn = QPushButton(uname)
-            name_btn.setStyleSheet("text-align: left; color: #dbdee1; font-weight: 500; border: none; background: transparent;")
+            name_btn.setStyleSheet("text-align: left; color: #dbdee1; font-weight: 500; border: none; background: transparent; font-size: 13px;")
             name_btn.clicked.connect(lambda checked, i_uid=uid, i_name=uname: self._on_user_chat_clicked(i_uid, i_name))
             i_layout.addWidget(name_btn, 1)
 
-            # Call button
+            # Quick Call button
             call_btn = QPushButton("📞")
             call_btn.setToolTip("Позвонить лично")
-            call_btn.setFixedSize(28, 28)
+            call_btn.setFixedSize(26, 26)
             call_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2b2d31;
-                    border: none;
-                    border-radius: 14px;
-                    font-size: 13px;
-                }
-                QPushButton:hover {
-                    background-color: #23a55a;
-                    color: white;
-                }
+                QPushButton { background: transparent; border: none; border-radius: 13px; font-size: 12px; }
+                QPushButton:hover { background-color: #23a55a; color: white; }
             """)
             call_btn.clicked.connect(lambda checked, i_uid=uid: self.call_user_requested.emit(i_uid))
             i_layout.addWidget(call_btn)
@@ -222,24 +231,16 @@ class ChannelListWidget(QWidget):
         for c in text_channels:
             cid = c.get("channel_id")
             cname = c.get("name")
-            btn = QPushButton(f"# {cname}")
+            btn = QPushButton(f"#  {cname}")
             is_active = (cid == self.active_text_ch_id)
             bg = "#404249" if is_active else "transparent"
             color = "#ffffff" if is_active else "#949ba4"
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    text-align: left;
-                    background-color: {bg};
-                    color: {color};
-                    border-radius: 4px;
-                    padding: 7px 10px;
-                    border: none;
-                    font-weight: 500;
+                    text-align: left; background-color: {bg}; color: {color};
+                    border-radius: 4px; padding: 7px 10px; border: none; font-weight: 500; font-size: 13px;
                 }}
-                QPushButton:hover {{
-                    background-color: #35373c;
-                    color: #dbdee1;
-                }}
+                QPushButton:hover {{ background-color: #35373c; color: #dbdee1; }}
             """)
             btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=cname: self._on_text_ch_clicked(r_id, ch_id, ch_nm))
             self.content_layout.addWidget(btn)
@@ -258,34 +259,24 @@ class ChannelListWidget(QWidget):
             bg = "#35373c" if is_connected else "transparent"
             color = "#23a55a" if is_connected else "#949ba4"
 
-            v_btn = QPushButton(f"🔊 {cname}")
+            v_btn = QPushButton(f"🔊  {cname}")
             v_btn.setStyleSheet(f"""
                 QPushButton {{
-                    text-align: left;
-                    background-color: {bg};
-                    color: {color};
-                    border-radius: 4px;
-                    padding: 7px 10px;
-                    border: none;
-                    font-weight: 500;
+                    text-align: left; background-color: {bg}; color: {color};
+                    border-radius: 4px; padding: 7px 10px; border: none; font-weight: 500; font-size: 13px;
                 }}
-                QPushButton:hover {{
-                    background-color: #35373c;
-                    color: #dbdee1;
-                }}
+                QPushButton:hover {{ background-color: #35373c; color: #dbdee1; }}
             """)
             v_btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=cname: self._on_voice_ch_clicked(r_id, ch_id, ch_nm))
             self.content_layout.addWidget(v_btn)
 
-            # Display users connected to this voice channel
             if voice_users:
                 u_container = QWidget()
                 u_layout = QVBoxLayout(u_container)
-                u_layout.setContentsMargins(24, 0, 8, 6)
-                u_layout.setSpacing(4)
+                u_layout.setContentsMargins(24, 0, 8, 4)
+                u_layout.setSpacing(3)
 
                 for uid in voice_users:
-                    # Find user name
                     uname = uid
                     for u in self.current_users_list:
                         if u.get("user_id") == uid:
@@ -308,12 +299,17 @@ class ChannelListWidget(QWidget):
 
     def _on_user_chat_clicked(self, user_id: str, username: str):
         self.active_dm_user_id = user_id
+        self._render_dm_list()
         self.dm_user_selected.emit(user_id, username)
 
     def set_active_voice(self, channel_id: Optional[str]):
         self.active_voice_ch_id = channel_id
         if self.current_mode != "@me":
             self._render_room_channels()
+
+    def _on_invite_click(self):
+        if self.current_mode and self.current_mode != "@me":
+            self.invite_room_requested.emit(self.current_mode)
 
     def _on_add_channel(self):
         if self.current_mode and self.current_mode != "@me":

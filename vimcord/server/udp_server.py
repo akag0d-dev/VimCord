@@ -13,7 +13,8 @@ from vimcord.common.protocol import (
     UDP_TYPE_CHANNEL_AUDIO,
     UDP_TYPE_DM_AUDIO,
     UDP_TYPE_PING,
-    UDP_TYPE_SPEAKING
+    UDP_TYPE_SPEAKING,
+    UDP_TYPE_SCREEN_FRAME
 )
 from vimcord.server.server_state import ServerState
 
@@ -58,6 +59,17 @@ class VoiceServerProtocol(asyncio.DatagramProtocol):
             peer_addr = self.server_state.get_call_peer_udp(sender_id, call_id)
             if peer_addr:
                 self.transport.sendto(data, peer_addr)
+
+        elif pkt_type == UDP_TYPE_SCREEN_FRAME:
+            # Screen frame can be sent to a room voice channel or a direct call
+            recipients = self.server_state.get_channel_voice_recipients(sender_id, target_id)
+            if recipients:
+                for r_addr in recipients:
+                    self.transport.sendto(data, r_addr)
+            else:
+                peer_addr = self.server_state.get_call_peer_udp(sender_id, target_id)
+                if peer_addr:
+                    self.transport.sendto(data, peer_addr)
 
     def error_received(self, exc):
         logger.warning(f"UDP error: {exc}")

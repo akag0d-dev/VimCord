@@ -107,10 +107,20 @@ class UserPanel(QWidget):
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.settings_btn)
 
-    def set_user(self, username: str, user_id: str):
+    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "В сети"):
         self.username = username
         self.user_id = user_id
         self.name_label.setText(username)
+        self.status_label.setText(status_text or "В сети")
+        initials = username[:2].upper() if username else "U"
+        self.avatar_label.setText(initials)
+        self.avatar_label.setStyleSheet(f"""
+            background-color: {avatar_color};
+            border-radius: 18px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #ffffff;
+        """)
 
     def _toggle_mic(self):
         self.is_muted = not self.is_muted

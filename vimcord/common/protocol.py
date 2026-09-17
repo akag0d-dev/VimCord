@@ -26,6 +26,12 @@ UDP_TYPE_CHANNEL_AUDIO = 2 # Audio for a room voice channel
 UDP_TYPE_DM_AUDIO = 3      # Audio for 1-on-1 direct call
 UDP_TYPE_PING = 4          # UDP Keep-alive / ping
 UDP_TYPE_SPEAKING = 5      # VAD speaking state notification (lightweight)
+UDP_TYPE_SCREEN_FRAME = 6 # Screen share JPEG frame payload
+
+
+def get_dm_chat_key(user_a: str, user_b: str) -> str:
+    """Computes a unique, canonical chat key for direct messaging between two users."""
+    return f"dm:{min(user_a, user_b)}:{max(user_a, user_b)}"
 
 # Header format:
 # Magic: 2 bytes (VC)

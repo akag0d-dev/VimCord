@@ -16,7 +16,8 @@ from vimcord.common.protocol import (
     UDP_TYPE_CHANNEL_AUDIO,
     UDP_TYPE_DM_AUDIO,
     UDP_TYPE_PING,
-    UDP_TYPE_SPEAKING
+    UDP_TYPE_SPEAKING,
+    UDP_TYPE_SCREEN_FRAME
 )
 from vimcord.client.audio.audio_manager import AudioManager
 
@@ -24,7 +25,8 @@ logger = logging.getLogger("VimCord.UDPVoice")
 
 
 class UDPVoiceSignals(QObject):
-    peer_speaking = pyqtSignal(str, bool)  # user_id, is_speaking
+    peer_speaking = pyqtSignal(str, bool)       # user_id, is_speaking
+    screen_frame_received = pyqtSignal(str, bytes)  # sender_id, jpeg_bytes
 
 
 class UDPVoiceClient:
@@ -151,11 +153,14 @@ class UDPVoiceClient:
         else:
             self.signals.peer_speaking.emit(self.user_id, False)
 
+    def send_screen_packet(self, data: bytes):
+        self._send_raw(data)
+
     def _receive_loop(self):
-        """Receives incoming audio packets from server and buffers them."""
+        """Receives incoming audio and screen packets from server and buffers them."""
         while self._is_running and self.sock:
             try:
-                data, addr = self.sock.recvfrom(4096)
+                data, addr = self.sock.recvfrom(65536)
                 if not data:
                     continue
 
@@ -170,6 +175,10 @@ class UDPVoiceClient:
                         self.audio_manager.add_peer_audio(sender_id, payload)
                         self._speaker_last_seen[sender_id] = time.time()
                         self.signals.peer_speaking.emit(sender_id, True)
+
+                elif pkt_type == UDP_TYPE_SCREEN_FRAME:
+                    if payload and sender_id != self.user_id:
+                        self.signals.screen_frame_received.emit(sender_id, payload)
 
             except Exception as e:
                 if self._is_running:

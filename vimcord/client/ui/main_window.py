@@ -1,6 +1,7 @@
 """
 Main Window for VimCord.
-Assembles the navigation rail, sidebar, voice stage, text chat, user panel, and call modals.
+Coordinates Navigation Rail, Channels/Friends sidebar, Text Chat with history,
+Voice Stage with animated VAD & Screen Sharing, and Account Settings.
 """
 
 import logging
@@ -8,17 +9,19 @@ from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QInputDialog, QMessageBox
+    QInputDialog, QMessageBox, QStackedWidget, QApplication
 )
 
 from vimcord.client.audio.audio_manager import AudioManager
 from vimcord.client.network.tcp_client import TCPClient
 from vimcord.client.network.udp_voice import UDPVoiceClient
+from vimcord.client.video.screen_share import ScreenCapturer
 from vimcord.client.ui.server_nav import ServerNavBar
 from vimcord.client.ui.channel_list import ChannelListWidget
 from vimcord.client.ui.user_panel import UserPanel
 from vimcord.client.ui.voice_view import VoiceView
 from vimcord.client.ui.chat_view import ChatView
+from vimcord.client.ui.friends_view import FriendsView
 from vimcord.client.ui.call_overlay import IncomingCallDialog, ActiveCallBanner
 from vimcord.client.ui.settings_dialog import SettingsDialog
 
@@ -32,28 +35,35 @@ class MainWindow(QMainWindow):
         self.audio_manager = audio_manager
         self.udp_voice = udp_voice
 
-        # User state
+        # Screen capturer
+        self.screen_capturer = ScreenCapturer(send_func=self.udp_voice.send_screen_packet)
+
+        # User profile state
         self.my_user_id = ""
         self.my_username = ""
+        self.my_avatar_color = "#5865F2"
+        self.my_status_text = "В сети"
         self.server_host = "127.0.0.1"
         self.server_udp_port = 9989
 
         # Cache of rooms and users
         self.rooms: Dict[str, Dict[str, Any]] = {}
         self.users: Dict[str, Dict[str, Any]] = {}
+        self.friends: List[Dict[str, Any]] = []
+
         self.current_room_id: Optional[str] = None  # None = @me (DMs)
         self.current_text_channel_id: Optional[str] = None
         self.current_dm_peer_id: Optional[str] = None
         self.current_voice_channel_id: Optional[str] = None
 
-        # Incoming call modal reference
+        # Call state
         self.incoming_dialog: Optional[IncomingCallDialog] = None
         self.active_call_id: Optional[str] = None
         self.active_call_peer_name: str = ""
 
         self.setWindowTitle("VimCord")
-        self.resize(1100, 720)
-        self.setMinimumSize(850, 550)
+        self.resize(1120, 740)
+        self.setMinimumSize(880, 560)
 
         self._init_ui()
         self._bind_signals()
@@ -66,11 +76,11 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 1. Leftmost server navigation bar (72px)
+        # 1. Leftmost server navigation rail (72px)
         self.server_nav = ServerNavBar(self)
         main_layout.addWidget(self.server_nav)
 
-        # 2. Sidebar container (Channel list + User panel at bottom) (240px)
+        # 2. Sidebar container (240px)
         sidebar_container = QWidget()
         sidebar_container.setFixedWidth(240)
         sidebar_container.setStyleSheet("background-color: #2b2d31;")
@@ -86,21 +96,27 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(sidebar_container)
 
-        # 3. Main content area (Splitter with Voice Stage and Chat View)
-        self.content_container = QWidget()
-        self.content_container.setStyleSheet("background-color: #313338;")
-        content_layout = QVBoxLayout(self.content_container)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
+        # 3. Main Center Area (Stacked Widget)
+        self.main_stack = QStackedWidget(self)
 
-        # Active 1-on-1 call banner
-        self.call_banner = ActiveCallBanner(self.content_container)
+        # View 0: Friends View (when clicking "Друзья" in DMs)
+        self.friends_view = FriendsView(self.main_stack)
+        self.main_stack.addWidget(self.friends_view)
+
+        # View 1: Chat and Voice Splitter
+        chat_voice_container = QWidget()
+        cv_layout = QVBoxLayout(chat_voice_container)
+        cv_layout.setContentsMargins(0, 0, 0, 0)
+        cv_layout.setSpacing(0)
+
+        # Active 1-on-1 Call Banner
+        self.call_banner = ActiveCallBanner(chat_voice_container)
         self.call_banner.hide()
-        content_layout.addWidget(self.call_banner)
+        cv_layout.addWidget(self.call_banner)
 
-        # Splitter for Voice View and Chat View
+        # Splitter: Voice View (top) & Chat View (bottom)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
-        self.splitter.setStyleSheet("QSplitter::handle { background-color: #1f2023; height: 3px; }")
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #1f2023; height: 4px; }")
 
         self.voice_view = VoiceView(self.splitter)
         self.voice_view.hide()
@@ -109,36 +125,52 @@ class MainWindow(QMainWindow):
         self.chat_view = ChatView(self.splitter)
         self.splitter.addWidget(self.chat_view)
 
-        content_layout.addWidget(self.splitter, 1)
-        main_layout.addWidget(self.content_container, 1)
+        # Keep voice stage compact, let chat take all remaining height
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+
+        cv_layout.addWidget(self.splitter, 1)
+        self.main_stack.addWidget(chat_voice_container)
+
+        main_layout.addWidget(self.main_stack, 1)
 
     def _bind_signals(self):
-        # Navigation signals
+        # Server Nav
         self.server_nav.dm_selected.connect(self._on_dm_nav_selected)
         self.server_nav.room_selected.connect(self._on_room_nav_selected)
-        self.server_nav.create_room_requested.connect(self._on_create_room_prompt)
+        self.server_nav.create_room_requested.connect(self._on_server_add_or_join_prompt)
 
-        # Sidebar signals
+        # Channel List
+        self.channel_list.friends_tab_selected.connect(self._on_friends_tab_selected)
         self.channel_list.text_channel_selected.connect(self._on_text_channel_selected)
         self.channel_list.voice_channel_selected.connect(self._on_voice_channel_selected)
         self.channel_list.create_channel_requested.connect(self._on_create_channel_prompt)
         self.channel_list.delete_room_requested.connect(self._on_delete_room)
+        self.channel_list.invite_room_requested.connect(self._on_create_room_invite)
         self.channel_list.dm_user_selected.connect(self._on_dm_user_selected)
         self.channel_list.call_user_requested.connect(self._on_call_user_requested)
 
-        # User panel signals
+        # Friends View
+        self.friends_view.open_dm_chat.connect(self._on_dm_user_selected)
+        self.friends_view.start_call.connect(self._on_call_user_requested)
+        self.friends_view.send_friend_req.connect(lambda uname: self.tcp_client.send_friend_request(uname))
+        self.friends_view.accept_friend_req.connect(lambda uid: self.tcp_client.send_accept_friend_request(uid))
+        self.friends_view.decline_friend_req.connect(lambda uid: self.tcp_client.send_decline_friend_request(uid))
+
+        # User Panel
         self.user_panel.mic_toggled.connect(self._on_mic_toggled)
         self.user_panel.deafen_toggled.connect(self._on_deafen_toggled)
         self.user_panel.settings_clicked.connect(self._on_settings_clicked)
 
-        # Voice stage signals
+        # Voice View & Screen Share
         self.voice_view.disconnect_clicked.connect(self._on_disconnect_voice)
+        self.voice_view.screen_share_toggled.connect(self._on_screen_share_toggled)
         self.call_banner.end_call_clicked.connect(self._on_end_active_call)
 
-        # Chat view signals
+        # Chat View
         self.chat_view.send_message_requested.connect(self._on_send_chat_message)
 
-        # TCP Client signals
+        # TCP Client events
         self.tcp_client.signals.disconnected.connect(self._on_server_disconnected)
         self.tcp_client.signals.user_presence.connect(self._on_user_presence)
         self.tcp_client.signals.room_created.connect(self._on_room_created)
@@ -147,6 +179,15 @@ class MainWindow(QMainWindow):
         self.tcp_client.signals.channel_deleted.connect(self._on_channel_deleted)
         self.tcp_client.signals.voice_state_update.connect(self._on_voice_state_update)
         self.tcp_client.signals.chat_message.connect(self._on_chat_message_received)
+        self.tcp_client.signals.history_response.connect(self._on_history_received)
+        self.tcp_client.signals.friends_update.connect(self._on_friends_update)
+        self.tcp_client.signals.friend_request_resp.connect(self._on_friend_request_resp)
+        self.tcp_client.signals.room_invite_created.connect(self._on_room_invite_created)
+        self.tcp_client.signals.room_invite_joined.connect(self._on_room_invite_joined)
+        self.tcp_client.signals.profile_update_resp.connect(self._on_profile_update_resp)
+        self.tcp_client.signals.change_password_resp.connect(self._on_change_password_resp)
+
+        # 1-on-1 Direct Calls
         self.tcp_client.signals.incoming_call.connect(self._on_incoming_call)
         self.tcp_client.signals.call_ringing.connect(self._on_call_ringing)
         self.tcp_client.signals.call_accepted.connect(self._on_call_accepted)
@@ -154,44 +195,54 @@ class MainWindow(QMainWindow):
         self.tcp_client.signals.call_ended.connect(self._on_call_ended)
         self.tcp_client.signals.call_failed.connect(self._on_call_failed)
 
-        # UDP Voice signals
+        # UDP Audio & Screen
         self.udp_voice.signals.peer_speaking.connect(self._on_peer_speaking)
+        self.udp_voice.signals.screen_frame_received.connect(self._on_screen_frame_received)
 
-    def initialize_session(self, user_id: str, username: str, rooms: List[Dict], users: List[Dict], host: str, udp_port: int):
-        """Called after successful login."""
+    def initialize_session(self, user_id: str, username: str, avatar_color: str, status_text: str,
+                           rooms: List[Dict], users: List[Dict], friends: List[Dict], host: str, udp_port: int):
         self.my_user_id = user_id
         self.my_username = username
+        self.my_avatar_color = avatar_color or "#5865F2"
+        self.my_status_text = status_text or "В сети"
         self.server_host = host
         self.server_udp_port = udp_port
 
         self.setWindowTitle(f"VimCord — {username}")
-        self.user_panel.set_user(username, user_id)
+        self.user_panel.set_user(username, user_id, self.my_avatar_color, self.my_status_text)
         self.channel_list.set_my_user_id(user_id)
 
-        # Cache rooms
         self.rooms = {r["room_id"]: r for r in rooms}
         self.users = {u["user_id"]: u for u in users}
+        self.friends = friends
 
-        # Populate UI
         self.server_nav.set_rooms(list(self.rooms.values()))
         self.channel_list.show_dm_mode(list(self.users.values()))
+        self.friends_view.set_friends(friends)
+        self.friends_view.set_online_users(self.users)
 
-        # Start audio and UDP
         self.audio_manager.start()
         self.udp_voice.start(user_id, host, udp_port)
 
-        # Default select the first room if available
+        # Open default server or friends tab
         default_r = next((r for r in self.rooms.values() if r["room_id"] == "room-default"), None)
         if default_r:
             self._on_room_nav_selected(default_r["room_id"])
             self.server_nav.set_active(default_r["room_id"])
+        else:
+            self._on_friends_tab_selected()
 
     # ------------------ Navigation Handlers ------------------
 
     def _on_dm_nav_selected(self):
         self.current_room_id = None
         self.channel_list.show_dm_mode(list(self.users.values()))
-        self.chat_view.set_target("Личные сообщения", is_channel=False)
+        self._on_friends_tab_selected()
+
+    def _on_friends_tab_selected(self):
+        self.main_stack.setCurrentWidget(self.friends_view)
+        self.friends_view.set_friends(self.friends)
+        self.friends_view.set_online_users(self.users)
 
     def _on_room_nav_selected(self, room_id: str):
         self.current_room_id = room_id
@@ -200,17 +251,52 @@ class MainWindow(QMainWindow):
             return
         
         self.channel_list.show_room_mode(room)
+        self.main_stack.setCurrentIndex(1)  # Chat & Voice Splitter
         
-        # Select first text channel
         text_channels = [c for c in room.get("channels", []) if c.get("channel_type") == "text"]
         if text_channels:
             first_ch = text_channels[0]
             self._on_text_channel_selected(room_id, first_ch["channel_id"], first_ch["name"])
 
-    def _on_create_room_prompt(self):
-        name, ok = QInputDialog.getText(self, "Создать сервер", "Название нового сервера (комнаты):")
-        if ok and name.strip():
-            self.tcp_client.send_create_room(name.strip())
+    def _on_server_add_or_join_prompt(self):
+        items = ["Создать новый сервер (комнату)", "Присоединиться по инвайт-коду"]
+        choice, ok = QInputDialog.getItem(self, "Серверы VimCord", "Выберите действие:", items, 0, False)
+        if not ok:
+            return
+
+        if "Создать" in choice:
+            name, ok2 = QInputDialog.getText(self, "Создать сервер", "Название нового сервера:")
+            if ok2 and name.strip():
+                self.tcp_client.send_create_room(name.strip())
+        else:
+            code, ok2 = QInputDialog.getText(self, "Присоединиться к серверу", "Введите код приглашения (например, VC-A1B2):")
+            if ok2 and code.strip():
+                self.tcp_client.send_join_room_by_invite(code.strip())
+
+    def _on_create_room_invite(self, room_id: str):
+        self.tcp_client.send_create_room_invite(room_id)
+
+    def _on_room_invite_created(self, room_id: str, code: str):
+        # Copy to clipboard and show info
+        clipboard = QApplication.clipboard()
+        clipboard.setText(code)
+        QMessageBox.information(
+            self, "Приглашение на сервер",
+            f"Код приглашения создан и скопирован в буфер обмена!\n\nКод: {code}\n\nОтправьте его друзьям, чтобы они присоединились к серверу."
+        )
+
+    def _on_room_invite_joined(self, success: bool, data: Dict[str, Any]):
+        if success:
+            room = data.get("room", {})
+            rid = room.get("room_id")
+            if rid:
+                self.rooms[rid] = room
+                self.server_nav.add_room_button(room)
+                self._on_room_nav_selected(rid)
+                self.server_nav.set_active(rid)
+            QMessageBox.information(self, "Успешно", f"Вы присоединились к серверу '{room.get('name')}'!")
+        else:
+            QMessageBox.warning(self, "Ошибка", data.get("message", "Не удалось присоединиться по коду"))
 
     def _on_create_channel_prompt(self, room_id: str):
         items = ["Текстовый канал", "Голосовой канал"]
@@ -231,10 +317,12 @@ class MainWindow(QMainWindow):
     def _on_text_channel_selected(self, room_id: str, channel_id: str, name: str):
         self.current_text_channel_id = channel_id
         self.current_dm_peer_id = None
-        self.chat_view.set_target(name, is_channel=True)
+        self.main_stack.setCurrentIndex(1)
+        self.chat_view.set_target(channel_id, name, is_channel=True)
+        # Request persistent history from server
+        self.tcp_client.send_get_history("channel", channel_id)
 
     def _on_voice_channel_selected(self, room_id: str, channel_id: str, name: str):
-        # Disconnect any active 1-on-1 call first
         if self.active_call_id:
             self._on_end_active_call()
 
@@ -242,21 +330,24 @@ class MainWindow(QMainWindow):
         self.udp_voice.current_channel_id = channel_id
         self.channel_list.set_active_voice(channel_id)
 
-        # Notify server
         self.tcp_client.send_join_voice(room_id, channel_id)
         self.audio_manager.play_join_chime()
 
-        # Update voice stage
         self.voice_view.set_channel_info(name)
         self.voice_view.show()
         self._refresh_voice_stage_users()
 
     def _on_disconnect_voice(self):
+        if self.screen_capturer.is_sharing:
+            self.screen_capturer.stop_sharing()
+            self.voice_view.is_screen_sharing = False
+
         if self.current_voice_channel_id:
             self.tcp_client.send_leave_voice()
             self.current_voice_channel_id = None
             self.udp_voice.current_channel_id = None
             self.channel_list.set_active_voice(None)
+            self.voice_view.hide_screen_share()
             self.voice_view.hide()
             self.audio_manager.play_leave_chime()
             self.audio_manager.clear_peers()
@@ -264,7 +355,10 @@ class MainWindow(QMainWindow):
     def _on_dm_user_selected(self, user_id: str, username: str):
         self.current_dm_peer_id = user_id
         self.current_text_channel_id = None
-        self.chat_view.set_target(username, is_channel=False)
+        self.main_stack.setCurrentIndex(1)
+        self.chat_view.set_target(user_id, username, is_channel=False)
+        # Request persistent history from server
+        self.tcp_client.send_get_history("dm", user_id)
 
     def _on_call_user_requested(self, user_id: str):
         if self.active_call_id or self.current_voice_channel_id:
@@ -279,8 +373,6 @@ class MainWindow(QMainWindow):
             if self.active_call_id:
                 self._on_end_active_call()
 
-        target = self.users.get(user_id)
-        target_name = target.get("username", "пользователю") if target else "пользователю"
         self.audio_manager.start_ringtone("outgoing")
         self.tcp_client.send_call_start(user_id)
 
@@ -297,13 +389,36 @@ class MainWindow(QMainWindow):
         t_id = msg.get("target_id")
         sender_id = msg.get("sender_id")
 
-        if t_type == "channel" and t_id == self.current_text_channel_id:
+        if t_type == "channel":
             self.chat_view.append_message(msg)
         elif t_type == "dm":
-            if t_id == self.current_dm_peer_id or sender_id == self.current_dm_peer_id or sender_id == self.my_user_id:
-                self.chat_view.append_message(msg)
+            # Determine appropriate chat key
+            dm_peer = sender_id if sender_id != self.my_user_id else t_id
+            msg_copy = dict(msg)
+            msg_copy["target_id"] = dm_peer
+            self.chat_view.append_message(msg_copy)
 
-    # ------------------ 1-on-1 Direct Calls Signaling ------------------
+    def _on_history_received(self, target_type: str, target_id: str, messages: List[Dict[str, Any]]):
+        self.chat_view.set_history(target_id, messages)
+
+    # ------------------ Screen Sharing ------------------
+
+    def _on_screen_share_toggled(self, is_sharing: bool):
+        target = self.active_call_id or self.current_voice_channel_id
+        if not target:
+            return
+        if is_sharing:
+            self.screen_capturer.start_sharing(self.my_user_id, target)
+        else:
+            self.screen_capturer.stop_sharing()
+
+    def _on_screen_frame_received(self, sender_id: str, jpeg_data: bytes):
+        sender_name = sender_id
+        if sender_id in self.users:
+            sender_name = self.users[sender_id].get("username", sender_id)
+        self.voice_view.display_screen_frame(sender_name, jpeg_data)
+
+    # ------------------ Direct Calls (1-on-1) ------------------
 
     def _on_incoming_call(self, call_id: str, from_user_id: str, from_username: str):
         self.audio_manager.start_ringtone("incoming")
@@ -314,7 +429,7 @@ class MainWindow(QMainWindow):
 
     def _on_accept_incoming_call(self, call_id: str):
         self.audio_manager.stop_ringtone()
-        self._on_disconnect_voice()  # Leave any room voice channel
+        self._on_disconnect_voice()
         self.tcp_client.send_call_accept(call_id)
 
     def _on_decline_incoming_call(self, call_id: str):
@@ -322,7 +437,7 @@ class MainWindow(QMainWindow):
         self.tcp_client.send_call_decline(call_id)
 
     def _on_call_ringing(self, call_id: str, target_user_id: str):
-        pass  # Ringtone already started
+        pass
 
     def _on_call_accepted(self, call_id: str, peer_id: str, peer_name: str):
         self.audio_manager.stop_ringtone()
@@ -330,14 +445,17 @@ class MainWindow(QMainWindow):
         self.active_call_peer_name = peer_name
         self.udp_voice.active_call_id = call_id
 
-        # Show call banner
         self.call_banner.start(peer_name)
+        self.main_stack.setCurrentIndex(1)
 
-        # Show voice view with participants
+        peer_color = "#5865F2"
+        if peer_id in self.users:
+            peer_color = self.users[peer_id].get("avatar_color", "#5865F2")
+
         self.voice_view.set_channel_info(f"Личный звонок: {peer_name}")
         self.voice_view.update_participants([
-            {"user_id": self.my_user_id, "username": self.my_username},
-            {"user_id": peer_id, "username": peer_name}
+            {"user_id": self.my_user_id, "username": self.my_username, "avatar_color": self.my_avatar_color},
+            {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
         ])
         self.voice_view.show()
 
@@ -348,9 +466,12 @@ class MainWindow(QMainWindow):
     def _on_call_ended(self, call_id: str):
         self.audio_manager.stop_ringtone()
         if self.active_call_id == call_id:
+            if self.screen_capturer.is_sharing:
+                self.screen_capturer.stop_sharing()
             self.active_call_id = None
             self.udp_voice.active_call_id = None
             self.call_banner.stop()
+            self.voice_view.hide_screen_share()
             self.voice_view.hide()
             self.audio_manager.clear_peers()
 
@@ -361,13 +482,16 @@ class MainWindow(QMainWindow):
     def _on_end_active_call(self):
         if self.active_call_id:
             self.tcp_client.send_call_end(self.active_call_id)
+            if self.screen_capturer.is_sharing:
+                self.screen_capturer.stop_sharing()
             self.active_call_id = None
             self.udp_voice.active_call_id = None
             self.call_banner.stop()
+            self.voice_view.hide_screen_share()
             self.voice_view.hide()
             self.audio_manager.clear_peers()
 
-    # ------------------ Audio & Speaking Indicators ------------------
+    # ------------------ Audio & Indicators ------------------
 
     def _on_mic_toggled(self, is_muted: bool):
         self.audio_manager.is_muted = is_muted
@@ -376,8 +500,20 @@ class MainWindow(QMainWindow):
         self.audio_manager.is_deafened = is_deafened
 
     def _on_settings_clicked(self):
-        dlg = SettingsDialog(self.audio_manager, self)
+        user_data = {
+            "user_id": self.my_user_id,
+            "username": self.my_username,
+            "avatar_color": self.my_avatar_color,
+            "status_text": self.my_status_text
+        }
+        dlg = SettingsDialog(self.audio_manager, user_data, self)
+        dlg.profile_updated.connect(lambda u, s, c: self.tcp_client.send_update_profile(u, s, c))
+        dlg.password_changed.connect(lambda op, np: self.tcp_client.send_change_password(op, np))
+        dlg.logout_requested.connect(self._on_logout_requested)
         dlg.exec()
+
+    def _on_logout_requested(self):
+        self.close()
 
     def _on_peer_speaking(self, user_id: str, is_speaking: bool):
         self.voice_view.set_user_speaking(user_id, is_speaking)
@@ -394,15 +530,39 @@ class MainWindow(QMainWindow):
             if ch.get("channel_id") == self.current_voice_channel_id:
                 for uid in ch.get("voice_users", []):
                     uname = uid
+                    color = "#5865F2"
                     if uid == self.my_user_id:
                         uname = self.my_username
+                        color = self.my_avatar_color
                     elif uid in self.users:
                         uname = self.users[uid].get("username", uid)
-                    participants.append({"user_id": uid, "username": uname})
+                        color = self.users[uid].get("avatar_color", "#5865F2")
+                    participants.append({"user_id": uid, "username": uname, "avatar_color": color})
                 break
         self.voice_view.update_participants(participants)
 
     # ------------------ Server Events ------------------
+
+    def _on_friends_update(self, friends_list: List[Dict[str, Any]]):
+        self.friends = friends_list
+        self.friends_view.set_friends(friends_list)
+
+    def _on_friend_request_resp(self, success: bool, message: str):
+        self.friends_view.set_feedback(success, message)
+
+    def _on_profile_update_resp(self, success: bool, message: str, user_dict: Dict[str, Any]):
+        if success and user_dict:
+            self.my_username = user_dict.get("username", self.my_username)
+            self.my_avatar_color = user_dict.get("avatar_color", self.my_avatar_color)
+            self.my_status_text = user_dict.get("status_text", self.my_status_text)
+            self.user_panel.set_user(self.my_username, self.my_user_id, self.my_avatar_color, self.my_status_text)
+            self.setWindowTitle(f"VimCord — {self.my_username}")
+
+    def _on_change_password_resp(self, success: bool, message: str):
+        if success:
+            QMessageBox.information(self, "Пароль", message)
+        else:
+            QMessageBox.warning(self, "Пароль", message)
 
     def _on_user_presence(self, user_dict: Dict[str, Any]):
         uid = user_dict.get("user_id")
@@ -414,6 +574,7 @@ class MainWindow(QMainWindow):
             self.users.pop(uid, None)
         
         self.channel_list.update_users(list(self.users.values()))
+        self.friends_view.set_online_users(self.users)
 
     def _on_room_created(self, room: Dict[str, Any]):
         rid = room.get("room_id")
@@ -470,6 +631,8 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Разрыв связи", "Соединение с сервером VimCord потеряно.")
 
     def closeEvent(self, event):
+        if self.screen_capturer.is_sharing:
+            self.screen_capturer.stop_sharing()
         if self.active_call_id:
             self.tcp_client.send_call_end(self.active_call_id)
         if self.current_voice_channel_id:

@@ -1,16 +1,20 @@
 """
-In-memory state manager for VimCord server (users, rooms, channels, direct calls).
+In-memory and persistent state manager for VimCord server (users, rooms, channels, direct calls).
+Integrates with Database (SQLite).
 """
 
 import time
 import uuid
 from typing import Dict, Optional, Set, Tuple, List, Any
+from vimcord.server.db import Database
 
 
 class User:
-    def __init__(self, user_id: str, username: str, tcp_writer=None):
+    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети"):
         self.user_id = user_id
         self.username = username
+        self.avatar_color = avatar_color
+        self.status_text = status_text
         self.tcp_writer = tcp_writer
         self.udp_addr: Optional[Tuple[str, int]] = None
         self.current_room_id: Optional[str] = None
@@ -22,6 +26,8 @@ class User:
         return {
             "user_id": self.user_id,
             "username": self.username,
+            "avatar_color": self.avatar_color,
+            "status_text": self.status_text,
             "current_room_id": self.current_room_id,
             "current_voice_channel_id": self.current_voice_channel_id,
             "in_call": bool(self.active_call_id),
@@ -71,33 +77,37 @@ class CallSession:
 
 
 class ServerState:
-    def __init__(self):
+    def __init__(self, db: Optional[Database] = None):
+        self.db = db or Database()
         self.users: Dict[str, User] = {}
         self.udp_addr_to_user_id: Dict[Tuple[str, int], str] = {}
         self.rooms: Dict[str, Room] = {}
         self.calls: Dict[str, CallSession] = {}
         
-        # Initialize default public room
-        self._init_default_room()
+        # Load rooms and channels from database
+        self._load_from_db()
 
-    def _init_default_room(self):
-        default_room = Room(room_id="room-default", name="Главный Сервер", owner_id="system")
-        
-        c_general = Channel(channel_id="ch-general", name="общий-чат", channel_type="text")
-        c_gaming = Channel(channel_id="ch-gaming", name="флудилка", channel_type="text")
-        v_voice1 = Channel(channel_id="vch-lobby", name="🔊 Голосовой 1", channel_type="voice")
-        v_voice2 = Channel(channel_id="vch-gaming", name="🔊 Игровая комната", channel_type="voice")
-        
-        default_room.channels[c_general.channel_id] = c_general
-        default_room.channels[c_gaming.channel_id] = c_gaming
-        default_room.channels[v_voice1.channel_id] = v_voice1
-        default_room.channels[v_voice2.channel_id] = v_voice2
-        
-        self.rooms[default_room.room_id] = default_room
+    def _load_from_db(self):
+        loaded_rooms = self.db.load_all_rooms_and_channels()
+        for r_data in loaded_rooms:
+            r = Room(room_id=r_data["room_id"], name=r_data["name"], owner_id=r_data["owner_id"])
+            for ch_data in r_data.get("channels", []):
+                ch = Channel(
+                    channel_id=ch_data["channel_id"],
+                    name=ch_data["name"],
+                    channel_type=ch_data["channel_type"]
+                )
+                r.channels[ch.channel_id] = ch
+            self.rooms[r.room_id] = r
 
-    def add_user(self, username: str, tcp_writer) -> User:
-        user_id = "u-" + uuid.uuid4().hex[:8]
-        user = User(user_id=user_id, username=username, tcp_writer=tcp_writer)
+    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети") -> User:
+        user = User(
+            user_id=user_id,
+            username=username,
+            tcp_writer=tcp_writer,
+            avatar_color=avatar_color,
+            status_text=status_text
+        )
         self.users[user_id] = user
         return user
 
@@ -131,25 +141,34 @@ class ServerState:
         room_id = "room-" + uuid.uuid4().hex[:8]
         room = Room(room_id=room_id, name=name, owner_id=owner_id)
         
-        # Add default text and voice channel
-        ch_text = Channel(channel_id="ch-" + uuid.uuid4().hex[:6], name="основной", channel_type="text")
-        ch_voice = Channel(channel_id="vch-" + uuid.uuid4().hex[:6], name="🔊 Голосовой", channel_type="voice")
-        room.channels[ch_text.channel_id] = ch_text
-        room.channels[ch_voice.channel_id] = ch_voice
+        # Add default text and voice channels
+        ch_text_id = "ch-" + uuid.uuid4().hex[:6]
+        ch_voice_id = "vch-" + uuid.uuid4().hex[:6]
+        
+        ch_text = Channel(channel_id=ch_text_id, name="основной", channel_type="text")
+        ch_voice = Channel(channel_id=ch_voice_id, name="🔊 Голосовой", channel_type="voice")
+        room.channels[ch_text_id] = ch_text
+        room.channels[ch_voice_id] = ch_voice
         
         self.rooms[room_id] = room
+        
+        # Persist in DB
+        self.db.save_room(room_id, name, owner_id)
+        self.db.save_channel(ch_text_id, room_id, "основной", "text")
+        self.db.save_channel(ch_voice_id, room_id, "🔊 Голосовой", "voice")
+        
         return room
 
     def delete_room(self, room_id: str) -> bool:
         if room_id == "room-default":
             return False  # Protect default room
         if room_id in self.rooms:
-            # Disconnect any users in voice channels of this room
             room = self.rooms[room_id]
             for ch in room.channels.values():
                 for uid in list(ch.voice_users):
                     self.leave_voice(uid)
             del self.rooms[room_id]
+            self.db.delete_room(room_id)
             return True
         return False
 
@@ -161,6 +180,9 @@ class ServerState:
         channel_id = prefix + uuid.uuid4().hex[:6]
         channel = Channel(channel_id=channel_id, name=name, channel_type=channel_type)
         room.channels[channel_id] = channel
+        
+        # Persist in DB
+        self.db.save_channel(channel_id, room_id, name, channel_type)
         return channel
 
     def delete_channel(self, room_id: str, channel_id: str) -> bool:
@@ -171,6 +193,7 @@ class ServerState:
         for uid in list(ch.voice_users):
             self.leave_voice(uid)
         del room.channels[channel_id]
+        self.db.delete_channel(channel_id)
         return True
 
     def join_voice(self, user_id: str, room_id: str, channel_id: str) -> bool:
@@ -183,7 +206,6 @@ class ServerState:
         if channel.channel_type != "voice":
             return False
             
-        # Leave any previous voice channel
         self.leave_voice(user_id)
         
         channel.voice_users.add(user_id)
@@ -192,7 +214,6 @@ class ServerState:
         return True
 
     def leave_voice(self, user_id: str) -> Optional[Tuple[str, str]]:
-        """Leaves voice. Returns (room_id, channel_id) if user was in a channel."""
         user = self.users.get(user_id)
         if not user or not user.current_voice_channel_id:
             return None
@@ -209,7 +230,6 @@ class ServerState:
         return room_id, channel_id
 
     def get_channel_voice_recipients(self, sender_id: str, channel_id: str) -> List[Tuple[str, int]]:
-        """Finds all UDP addresses of other users connected to the same voice channel."""
         recipients = []
         for room in self.rooms.values():
             if channel_id in room.channels:

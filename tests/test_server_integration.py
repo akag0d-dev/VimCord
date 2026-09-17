@@ -1,9 +1,11 @@
 """
-End-to-end integration test for VimCord TCP server and UDP voice router.
+End-to-end integration test for VimCord TCP server and UDP voice/screen router.
 """
 
 import asyncio
+import os
 import socket
+import tempfile
 import unittest
 from vimcord.common.protocol import (
     encode_json_message,
@@ -11,8 +13,10 @@ from vimcord.common.protocol import (
     pack_udp_audio,
     unpack_udp_audio,
     UDP_TYPE_REGISTER,
-    UDP_TYPE_DM_AUDIO
+    UDP_TYPE_DM_AUDIO,
+    UDP_TYPE_SCREEN_FRAME
 )
+from vimcord.server.db import Database
 from vimcord.server.server_state import ServerState
 from vimcord.server.tcp_server import TCPServer
 from vimcord.server.udp_server import start_udp_server
@@ -24,7 +28,10 @@ TEST_HOST = "127.0.0.1"
 
 class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.state = ServerState()
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        db_path = os.path.join(self.tmp_dir.name, "integration_test.db")
+        self.db = Database(db_path)
+        self.state = ServerState(self.db)
         self.udp_transport = await start_udp_server(self.state, TEST_HOST, TEST_UDP_PORT)
         self.tcp_server = TCPServer(self.state, TEST_HOST, TEST_TCP_PORT)
         self.tcp_srv_obj = await asyncio.start_server(
@@ -37,6 +44,7 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         self.udp_transport.close()
         self.tcp_srv_obj.close()
         await self.tcp_srv_obj.wait_closed()
+        self.tmp_dir.cleanup()
 
     async def _read_json(self, reader: asyncio.StreamReader):
         line = await asyncio.wait_for(reader.readline(), timeout=3.0)
@@ -101,7 +109,7 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(v_upd_a["type"], "voice_state_update")
         self.assertEqual(v_upd_a["action"], "join")
 
-        # 6. Text message
+        # 6. Text message sending and history retrieval
         w_a.write(encode_json_message({
             "type": "send_msg",
             "target_type": "channel",
@@ -114,12 +122,23 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msg_b["content"], "Привет, Боб!")
         self.assertEqual(msg_b["sender_name"], "Alice")
 
+        # Request history from server
+        w_b.write(encode_json_message({
+            "type": "get_history",
+            "target_type": "channel",
+            "target_id": "ch-general"
+        }))
+        await w_b.drain()
+        hist_b = await self._read_json(r_b)
+        self.assertEqual(hist_b["type"], "history_resp")
+        self.assertEqual(len(hist_b["messages"]), 1)
+        self.assertEqual(hist_b["messages"][0]["content"], "Привет, Боб!")
+
         # 7. Direct 1-on-1 Call
         # Alice calls Bob
         w_a.write(encode_json_message({"type": "call_start", "target_user_id": bob_id}))
         await w_a.drain()
 
-        # Alice gets call_ringing, Bob gets incoming_call
         ring_a = await self._read_json(r_a)
         self.assertEqual(ring_a["type"], "call_ringing")
         call_id = ring_a["call_id"]
@@ -160,13 +179,28 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         # Bob reads incoming UDP packets until audio packet from Alice arrives
         payload = None
         for _ in range(3):
-            data, _ = await asyncio.to_thread(udp_b.recvfrom, 4096)
+            data, _ = await asyncio.to_thread(udp_b.recvfrom, 65536)
             unpacked = unpack_udp_audio(data)
             if unpacked and unpacked[2] == alice_id:
                 pkt_type, seq, sender_id, target_id, payload = unpacked
                 break
 
         self.assertEqual(payload, test_audio)
+
+        # Send test screen frame packet over UDP from Alice to Bob
+        test_screen_frame = b"\xFF\xD8\xFF\xE0" + b"\x00" * 200 # Fake JPEG header
+        screen_pkt = pack_udp_audio(UDP_TYPE_SCREEN_FRAME, 3, alice_id, call_id, test_screen_frame)
+        udp_a.sendto(screen_pkt, (TEST_HOST, TEST_UDP_PORT))
+
+        screen_payload = None
+        for _ in range(3):
+            data, _ = await asyncio.to_thread(udp_b.recvfrom, 65536)
+            unpacked = unpack_udp_audio(data)
+            if unpacked and unpacked[0] == UDP_TYPE_SCREEN_FRAME:
+                pkt_type, seq, sender_id, target_id, screen_payload = unpacked
+                break
+
+        self.assertEqual(screen_payload, test_screen_frame)
 
         # Alice ends call
         w_a.write(encode_json_message({"type": "call_end", "call_id": call_id}))

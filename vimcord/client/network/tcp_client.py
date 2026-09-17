@@ -20,23 +20,39 @@ class TCPClientSignals(QObject):
     disconnected = pyqtSignal()
     error = pyqtSignal(str)
 
-    # Server events
-    login_response = pyqtSignal(bool, dict)  # success, full_resp_data
-    user_presence = pyqtSignal(dict)         # user_dict
-    room_created = pyqtSignal(dict)          # room_dict
-    room_deleted = pyqtSignal(str)           # room_id
-    channel_created = pyqtSignal(str, dict)  # room_id, channel_dict
-    channel_deleted = pyqtSignal(str, str)   # room_id, channel_id
-    voice_state_update = pyqtSignal(dict)    # dict with user_id, room_id, channel_id, action
-    chat_message = pyqtSignal(dict)          # message dict
-    
+    # Auth events
+    register_response = pyqtSignal(bool, str)     # success, message
+    login_response = pyqtSignal(bool, dict)       # success, full_resp_data
+    user_presence = pyqtSignal(dict)              # user_dict
+
+    # Rooms & channels
+    room_created = pyqtSignal(dict)               # room_dict
+    room_deleted = pyqtSignal(str)                # room_id
+    channel_created = pyqtSignal(str, dict)       # room_id, channel_dict
+    channel_deleted = pyqtSignal(str, str)        # room_id, channel_id
+    voice_state_update = pyqtSignal(dict)         # dict with user_id, room_id, channel_id, action
+
+    # Chat & history
+    chat_message = pyqtSignal(dict)               # message dict
+    history_response = pyqtSignal(str, str, list) # target_type, target_id, messages list
+
+    # Invites & Friends
+    room_invite_created = pyqtSignal(str, str)    # room_id, code
+    room_invite_joined = pyqtSignal(bool, dict)   # success, room_data_or_error
+    friends_update = pyqtSignal(list)             # list of friend dicts
+    friend_request_resp = pyqtSignal(bool, str)   # success, message
+
+    # Profile & settings
+    profile_update_resp = pyqtSignal(bool, str, dict) # success, message, user_dict
+    change_password_resp = pyqtSignal(bool, str)      # success, message
+
     # 1-on-1 Call events
-    incoming_call = pyqtSignal(str, str, str)  # call_id, from_user_id, from_username
-    call_ringing = pyqtSignal(str, str)        # call_id, target_user_id
-    call_accepted = pyqtSignal(str, str, str)  # call_id, peer_id, peer_name
-    call_declined = pyqtSignal(str)            # call_id
-    call_ended = pyqtSignal(str)               # call_id
-    call_failed = pyqtSignal(str)              # reason
+    incoming_call = pyqtSignal(str, str, str)     # call_id, from_user_id, from_username
+    call_ringing = pyqtSignal(str, str)           # call_id, target_user_id
+    call_accepted = pyqtSignal(str, str, str)     # call_id, peer_id, peer_name
+    call_declined = pyqtSignal(str)               # call_id
+    call_ended = pyqtSignal(str)                  # call_id
+    call_failed = pyqtSignal(str)                 # reason
 
 
 class TCPClient:
@@ -93,8 +109,14 @@ class TCPClient:
             logger.error(f"Error sending message: {e}")
             self.disconnect()
 
-    def send_login(self, username: str):
-        self.send_message({"type": "login", "username": username})
+    def send_register(self, username: str, password: str):
+        self.send_message({"type": "register", "username": username, "password": password})
+
+    def send_login(self, username: str, password: str = ""):
+        self.send_message({"type": "login", "username": username, "password": password})
+
+    def send_get_history(self, target_type: str, target_id: str):
+        self.send_message({"type": "get_history", "target_type": target_type, "target_id": target_id})
 
     def send_create_room(self, name: str):
         self.send_message({"type": "create_room", "name": name})
@@ -117,12 +139,36 @@ class TCPClient:
             "channel_id": channel_id
         })
 
+    def send_create_room_invite(self, room_id: str):
+        self.send_message({"type": "create_room_invite", "room_id": room_id})
+
+    def send_join_room_by_invite(self, code: str):
+        self.send_message({"type": "join_room_by_invite", "code": code})
+
+    def send_friend_request(self, target_username: str):
+        self.send_message({"type": "send_friend_request", "username": target_username})
+
+    def send_accept_friend_request(self, sender_user_id: str):
+        self.send_message({"type": "accept_friend_request", "sender_user_id": sender_user_id})
+
+    def send_decline_friend_request(self, peer_id: str):
+        self.send_message({"type": "decline_friend_request", "peer_id": peer_id})
+
+    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None):
+        msg = {"type": "update_profile"}
+        if username:
+            msg["username"] = username
+        if status_text is not None:
+            msg["status_text"] = status_text
+        if avatar_color:
+            msg["avatar_color"] = avatar_color
+        self.send_message(msg)
+
+    def send_change_password(self, old_pass: str, new_pass: str):
+        self.send_message({"type": "change_password", "old_password": old_pass, "new_password": new_pass})
+
     def send_join_voice(self, room_id: str, channel_id: str):
-        self.send_message({
-            "type": "join_voice",
-            "room_id": room_id,
-            "channel_id": channel_id
-        })
+        self.send_message({"type": "join_voice", "room_id": room_id, "channel_id": channel_id})
 
     def send_leave_voice(self):
         self.send_message({"type": "leave_voice"})
@@ -148,7 +194,6 @@ class TCPClient:
         self.send_message({"type": "call_end", "call_id": call_id})
 
     def _receive_loop(self):
-        """Continuously reads newline-delimited JSON messages from the TCP socket."""
         buffer = ""
         while self._is_running and self.sock:
             try:
@@ -175,10 +220,12 @@ class TCPClient:
             self.disconnect()
 
     def _dispatch_message(self, msg: Dict[str, Any]):
-        """Dispatches decoded message to corresponding PyQt signal."""
         mtype = msg.get("type")
 
-        if mtype == "login_resp":
+        if mtype == "register_resp":
+            self.signals.register_response.emit(msg.get("success", False), msg.get("message", ""))
+
+        elif mtype == "login_resp":
             self.signals.login_response.emit(msg.get("success", False), msg)
 
         elif mtype == "user_presence":
@@ -201,6 +248,35 @@ class TCPClient:
 
         elif mtype == "new_msg":
             self.signals.chat_message.emit(msg)
+
+        elif mtype == "history_resp":
+            self.signals.history_response.emit(
+                msg.get("target_type", ""),
+                msg.get("target_id", ""),
+                msg.get("messages", [])
+            )
+
+        elif mtype == "room_invite_created":
+            self.signals.room_invite_created.emit(msg.get("room_id", ""), msg.get("code", ""))
+
+        elif mtype == "room_invite_joined":
+            self.signals.room_invite_joined.emit(msg.get("success", False), msg)
+
+        elif mtype == "friends_update":
+            self.signals.friends_update.emit(msg.get("friends", []))
+
+        elif mtype == "friend_request_resp":
+            self.signals.friend_request_resp.emit(msg.get("success", False), msg.get("message", ""))
+
+        elif mtype == "profile_update_resp":
+            self.signals.profile_update_resp.emit(
+                msg.get("success", False),
+                msg.get("message", ""),
+                msg.get("user", {})
+            )
+
+        elif mtype == "change_password_resp":
+            self.signals.change_password_resp.emit(msg.get("success", False), msg.get("message", ""))
 
         elif mtype == "incoming_call":
             self.signals.incoming_call.emit(

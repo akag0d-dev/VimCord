@@ -1,5 +1,6 @@
 """
 Main entry point for VimCord Client application.
+Supports registration, authentication, persistent session initialization, and audio setup.
 """
 
 import argparse
@@ -32,65 +33,103 @@ def main():
     tcp_port = args.tcp_port
     udp_port = args.udp_port
     username = args.user
+    password = ""
+    action = "login"
 
-    # If not auto-connect or username is empty, prompt login dialog
-    if not args.auto or not username:
-        login_dlg = LoginDialog(default_username=username)
-        if login_dlg.exec() != LoginDialog.DialogCode.Accepted:
-            sys.exit(0)
-
-        server_host = login_dlg.server_host
-        tcp_port = login_dlg.tcp_port
-        udp_port = login_dlg.udp_port
-        username = login_dlg.username
-
-    # Initialize audio & network subsystems
+    # Audio & network subsystems
     audio_mgr = AudioManager()
     tcp_client = TCPClient()
     udp_voice = UDPVoiceClient(audio_mgr)
 
-    # Connect to TCP server
-    if not tcp_client.connect_to_server(server_host, tcp_port):
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к серверу {server_host}:{tcp_port}!\nУбедитесь, что run_server.py запущен.")
-        sys.exit(1)
+    authenticated = False
+    login_data = {}
 
-    # Wait for login response synchronously via local event loop
-    login_result = {"success": False, "data": {}}
-    loop = QEventLoop()
+    while not authenticated:
+        if not args.auto or not username:
+            login_dlg = LoginDialog(default_username=username)
+            if login_dlg.exec() != LoginDialog.DialogCode.Accepted:
+                sys.exit(0)
 
-    def on_login_resp(success, data):
-        login_result["success"] = success
-        login_result["data"] = data
-        loop.quit()
+            server_host = login_dlg.server_host
+            tcp_port = login_dlg.tcp_port
+            udp_port = login_dlg.udp_port
+            username = login_dlg.username
+            password = login_dlg.password
+            action = login_dlg.action
 
-    def on_login_timeout():
-        loop.quit()
+        # Connect if not connected
+        if not tcp_client.sock:
+            if not tcp_client.connect_to_server(server_host, tcp_port):
+                QMessageBox.critical(None, "Ошибка подключения", f"Не удалось подключиться к {server_host}:{tcp_port}!\nУбедитесь, что run_server.py запущен.")
+                if args.auto:
+                    sys.exit(1)
+                continue
 
-    tcp_client.signals.login_response.connect(on_login_resp)
-    tcp_client.send_login(username)
+        # Handle Registration if requested
+        if action == "register":
+            reg_result = {"success": False, "message": ""}
+            loop_reg = QEventLoop()
 
-    # 4 second timeout for login
-    QTimer.singleShot(4000, on_login_timeout)
-    loop.exec()
+            def on_reg(ok, msg):
+                reg_result["success"] = ok
+                reg_result["message"] = msg
+                loop_reg.quit()
 
-    if not login_result["success"]:
-        QMessageBox.critical(None, "Ошибка", "Сервер не ответил на запрос входа или отклонил его.")
-        tcp_client.disconnect()
-        sys.exit(1)
+            tcp_client.signals.register_response.connect(on_reg)
+            tcp_client.send_register(username, password)
+            QTimer.singleShot(4000, loop_reg.quit)
+            loop_reg.exec()
 
-    data = login_result["data"]
-    user_id = data.get("user_id", "")
-    logged_in_name = data.get("username", username)
-    rooms = data.get("rooms", [])
-    users = data.get("users", [])
+            if not reg_result["success"]:
+                QMessageBox.warning(None, "Ошибка регистрации", reg_result.get("message", "Не удалось зарегистрироваться"))
+                if args.auto:
+                    sys.exit(1)
+                continue
+            else:
+                QMessageBox.information(None, "Успешно", "Аккаунт успешно создан! Выполняется автоматический вход...")
+
+        # Handle Login
+        login_res = {"success": False, "data": {}, "message": ""}
+        loop_login = QEventLoop()
+
+        def on_login(ok, data):
+            login_res["success"] = ok
+            login_res["data"] = data
+            login_res["message"] = data.get("message", "")
+            loop_login.quit()
+
+        tcp_client.signals.login_response.connect(on_login)
+        tcp_client.send_login(username, password)
+        QTimer.singleShot(4000, loop_login.quit)
+        loop_login.exec()
+
+        if login_res["success"]:
+            authenticated = True
+            login_data = login_res["data"]
+        else:
+            err_msg = login_res["message"] or "Неверный логин/пароль или сервер недоступен."
+            QMessageBox.warning(None, "Ошибка входа", err_msg)
+            if args.auto:
+                sys.exit(1)
+
+    user_id = login_data.get("user_id", "")
+    logged_in_name = login_data.get("username", username)
+    avatar_color = login_data.get("avatar_color", "#5865F2")
+    status_text = login_data.get("status_text", "В сети")
+    rooms = login_data.get("rooms", [])
+    users = login_data.get("users", [])
+    friends = login_data.get("friends", [])
 
     # Open main window
     main_win = MainWindow(tcp_client, audio_mgr, udp_voice)
     main_win.initialize_session(
         user_id=user_id,
         username=logged_in_name,
+        avatar_color=avatar_color,
+        status_text=status_text,
         rooms=rooms,
         users=users,
+        friends=friends,
         host=server_host,
         udp_port=udp_port
     )
