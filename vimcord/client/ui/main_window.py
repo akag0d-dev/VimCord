@@ -9,16 +9,18 @@ import time
 import uuid
 from typing import Dict, Any, List, Optional
 from pathlib import Path
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QInputDialog, QMessageBox, QStackedWidget, QApplication,
-    QSystemTrayIcon, QMenu
+    QSystemTrayIcon, QMenu, QLabel, QPushButton
 )
 
 from vimcord.common.protocol import pack_udp_audio, UDP_TYPE_SCREEN_FRAME
 
+from vimcord.client.config import load_config, save_config
+from vimcord.client.i18n import t, set_language
 from vimcord.client.audio.audio_manager import AudioManager
 from vimcord.client.network.tcp_client import TCPClient
 from vimcord.client.network.udp_voice import UDPVoiceClient
@@ -40,6 +42,98 @@ from vimcord.client.ui.member_list import MemberListWidget
 logger = logging.getLogger("VimCord.MainWindow")
 
 
+class ConnectionLostOverlay(QWidget):
+    reconnect_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("connection_lost_overlay")
+        self.setStyleSheet("""
+            QWidget#connection_lost_overlay {
+                background-color: rgba(18, 19, 22, 0.96);
+            }
+        """)
+        self.countdown_seconds = 10
+        self.timer = QTimer(self)
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self._on_tick)
+
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(14)
+
+        icon_lbl = QLabel("🔌")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 56px; margin-bottom: 4px; background: transparent;")
+        layout.addWidget(icon_lbl)
+
+        self.title_lbl = QLabel(t("connection_lost"))
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_lbl.setStyleSheet("color: #f23f43; font-size: 26px; font-weight: bold; background: transparent;")
+        layout.addWidget(self.title_lbl)
+
+        self.desc_lbl = QLabel(t("disconnected_from_server"))
+        self.desc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.desc_lbl.setStyleSheet("color: #dbdee1; font-size: 14px; background: transparent;")
+        layout.addWidget(self.desc_lbl)
+
+        self.countdown_lbl = QLabel("Automatically reconnecting in 10s...")
+        self.countdown_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.countdown_lbl.setStyleSheet("color: #949ba4; font-size: 13px; background: transparent;")
+        layout.addWidget(self.countdown_lbl)
+
+        self.reconnect_btn = QPushButton(f"🔄 {t('reconnect_now')}")
+        self.reconnect_btn.setFixedSize(190, 42)
+        self.reconnect_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5865F2; color: #ffffff; font-weight: bold;
+                font-size: 14px; border-radius: 6px; border: none;
+            }
+            QPushButton:hover { background-color: #4752c4; }
+        """)
+        self.reconnect_btn.clicked.connect(self._trigger_reconnect)
+        layout.addWidget(self.reconnect_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def show_overlay(self):
+        self.countdown_seconds = 10
+        self.countdown_lbl.setText("Automatically reconnecting in 10s...")
+        self.reconnect_btn.setEnabled(True)
+        self.reconnect_btn.setText(f"🔄 {t('reconnect_now')}")
+        self.timer.start()
+        if self.parent():
+            self.resize(self.parent().size())
+        self.show()
+        self.raise_()
+
+    def hide_overlay(self):
+        self.timer.stop()
+        self.hide()
+
+    def _on_tick(self):
+        self.countdown_seconds -= 1
+        if self.countdown_seconds <= 0:
+            self.timer.stop()
+            self._trigger_reconnect()
+        else:
+            self.countdown_lbl.setText(f"Automatically reconnecting in {self.countdown_seconds}s...")
+
+    def _trigger_reconnect(self):
+        self.timer.stop()
+        self.countdown_lbl.setText("Reconnecting to server...")
+        self.reconnect_btn.setEnabled(False)
+        self.reconnect_requested.emit()
+
+    def set_reconnect_failed(self):
+        self.countdown_seconds = 10
+        self.countdown_lbl.setText("Reconnect failed. Retrying in 10s...")
+        self.reconnect_btn.setEnabled(True)
+        self.reconnect_btn.setText("🔄 Retry Now")
+        self.timer.start()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, tcp_client: TCPClient, audio_manager: AudioManager, udp_voice: UDPVoiceClient):
         super().__init__()
@@ -57,12 +151,23 @@ class MainWindow(QMainWindow):
         # User profile state
         self.my_user_id = ""
         self.my_username = ""
+        self.my_display_name = ""
         self.my_avatar_color = "#5865F2"
         self.my_avatar_image = ""
+        self.my_banner_color = "#5865F2"
+        self.my_banner_image = ""
         self.my_bio = ""
         self.my_status_text = "Online"
-        self.server_host = "127.0.0.1"
+        self.server_host = "194.226.123.199"
+        self.server_tcp_port = 9988
         self.server_udp_port = 9989
+
+        # Client Config state
+        cfg = load_config()
+        self.dnd_mode = cfg.get("dnd_mode", False)
+        self.ptt_key = cfg.get("ptt_key", "Space")
+        self.current_language = cfg.get("language", "en")
+        set_language(self.current_language)
 
         # Push to Talk state
         self.ptt_key = "Space"
@@ -104,6 +209,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(880, 560)
 
         self._init_ui()
+
+        # Connection Lost Overlay
+        self.connection_overlay = ConnectionLostOverlay(self)
+        self.connection_overlay.hide()
+        self.connection_overlay.reconnect_requested.connect(self._on_reconnect_requested)
+
         self._bind_signals()
         self._apply_saved_theme()
 
@@ -153,6 +264,8 @@ class MainWindow(QMainWindow):
             self._on_toast_clicked(self._last_notification_payload)
 
     def notify_user(self, title: str, message: str, icon_str: str = "💬", payload: Any = None):
+        if getattr(self, "dnd_mode", False):
+            return
         self._last_notification_payload = payload
         # 1. In-app toast popup
         self.toast.show_toast(
@@ -273,6 +386,7 @@ class MainWindow(QMainWindow):
         self.channel_list.user_profile_requested.connect(self._open_user_profile)
         self.voice_view.user_profile_requested.connect(self._open_user_profile)
         self.user_panel.profile_clicked.connect(self._open_my_profile)
+        self.chat_view.open_profile_requested.connect(lambda uid: self._open_user_profile({"user_id": uid}))
 
         # Screen Share window
         self.screen_share_window.stop_stream_requested.connect(lambda: self._on_screen_share_toggled(False))
@@ -289,9 +403,12 @@ class MainWindow(QMainWindow):
         # Voice View & Member List peer volume / mute
         self.voice_view.disconnect_clicked.connect(self._on_disconnect_voice)
         self.voice_view.screen_share_toggled.connect(self._on_screen_share_toggled)
+        self.voice_view.popout_stream_requested.connect(self._on_popout_stream)
+        self.voice_view.stream_volume_changed.connect(self._on_stream_volume_changed)
         self.voice_view.peer_volume_changed.connect(self.audio_manager.set_peer_volume)
         self.voice_view.peer_mute_toggled.connect(self.audio_manager.set_peer_muted)
         self.call_banner.end_call_clicked.connect(self._on_end_active_call)
+        self.call_banner.volume_changed.connect(self._on_call_volume_changed)
 
         # Member List sidebar
         self.member_list.view_profile_requested.connect(lambda uid: self._open_user_profile({"user_id": uid}))
@@ -308,6 +425,7 @@ class MainWindow(QMainWindow):
 
         # TCP Client events
         self.tcp_client.signals.disconnected.connect(self._on_server_disconnected)
+        self.tcp_client.signals.login_response.connect(self._on_reconnect_login_resp)
         self.tcp_client.signals.user_presence.connect(self._on_user_presence)
         self.tcp_client.signals.room_created.connect(self._on_room_created)
         self.tcp_client.signals.room_deleted.connect(self._on_room_deleted)
@@ -346,11 +464,15 @@ class MainWindow(QMainWindow):
 
     def initialize_session(self, user_id: str, username: str, avatar_color: str, status_text: str,
                            rooms: List[Dict], users: List[Dict], friends: List[Dict], host: str, udp_port: int,
-                           avatar_image: str = "", bio: str = ""):
+                           avatar_image: str = "", bio: str = "", display_name: str = "",
+                           banner_color: str = "", banner_image: str = ""):
         self.my_user_id = user_id
         self.my_username = username
+        self.my_display_name = display_name or username
         self.my_avatar_color = avatar_color or "#5865F2"
         self.my_avatar_image = avatar_image or ""
+        self.my_banner_color = banner_color or "#5865F2"
+        self.my_banner_image = banner_image or ""
         self.my_bio = bio or ""
         self.my_status_text = status_text or "Online"
         self.server_host = host
@@ -364,8 +486,8 @@ class MainWindow(QMainWindow):
         self.member_list.set_current_user_id(user_id)
         self.ping_timer.start()
 
-        self.setWindowTitle(f"VimCord — {self.my_username}")
-        self.user_panel.set_user(self.my_username, user_id, self.my_avatar_color, self.my_status_text, self.my_avatar_image)
+        self.setWindowTitle(f"VimCord — {self.my_display_name} (@{self.my_username})")
+        self.user_panel.set_user(self.my_username, user_id, self.my_avatar_color, self.my_status_text, self.my_avatar_image, display_name=self.my_display_name)
         self.channel_list.set_my_user_id(user_id)
 
         self.rooms = {r["room_id"]: r for r in rooms}
@@ -546,6 +668,11 @@ class MainWindow(QMainWindow):
         self.tcp_client.send_get_history("dm", user_id)
 
     def _on_call_user_requested(self, user_id: str):
+        is_friend = any(f.get("peer_id") == user_id and f.get("friendship_status") == "accepted" for f in self.friends)
+        if not is_friend:
+            QMessageBox.warning(self, "Call Not Allowed", "You can only call users who are on your friends list.")
+            return
+
         if self.active_call_id or self.current_voice_channel_id:
             ret = QMessageBox.question(
                 self, "Call",
@@ -570,18 +697,22 @@ class MainWindow(QMainWindow):
         if not target_id:
             return
 
+        msg_id = "msg-" + uuid.uuid4().hex[:12]
+
         self.tcp_client.send_chat_message(target_type, target_id,
                                           content=text, image_data=image_data,
                                           voice_data=voice_data, voice_duration=voice_duration,
-                                          file_data=file_data, file_name=file_name, file_size=file_size)
+                                          file_data=file_data, file_name=file_name, file_size=file_size,
+                                          msg_id=msg_id)
 
         # Optimistic local append for immediate visual feedback
         local_msg = {
-            "msg_id": "loc-" + uuid.uuid4().hex[:8],
+            "msg_id": msg_id,
             "target_type": target_type,
             "target_id": target_id,
             "sender_id": self.my_user_id,
             "sender_name": self.my_username,
+            "display_name": getattr(self, "my_display_name", self.my_username),
             "avatar_color": self.my_avatar_color,
             "avatar_image": getattr(self, "my_avatar_image", ""),
             "content": text,
@@ -689,16 +820,19 @@ class MainWindow(QMainWindow):
 
         if new_sharing:
             self.screen_capturer.start_sharing(self.my_user_id, target, target_type)
+            self.audio_manager.start_desktop_audio_capture()
             self.voice_bar.set_screen_sharing(True)
             self.voice_view.screen_btn.setText("🔴 Stop Screen")
-            self.screen_share_window.set_streamer(self.my_username, is_local=True)
-            self.screen_share_window.show()
+            self.screen_share_window.set_streamer(self.my_display_name or self.my_username, is_local=True)
+            # Stream is displayed directly inside VoiceView stage - no unwanted popup window
         else:
             self.screen_capturer.stop_sharing()
+            self.audio_manager.stop_desktop_audio_capture()
             self.tcp_client.send_screen_stop(target_type, target)
             self.voice_bar.set_screen_sharing(False)
             self.voice_view.screen_btn.setText("🖥️ Screen")
             self.screen_share_window.hide()
+            self.voice_view.hide_screen_share()
 
     def _send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
         # 100% UDP transmission with 1200-byte datagram chunks (Discord architecture)
@@ -706,11 +840,12 @@ class MainWindow(QMainWindow):
         self.udp_voice.send_screen_frame_chunks(target_id, jpeg_data)
 
     def _on_local_screen_frame(self, jpeg_data: bytes):
-        pixmap = QPixmap()
-        if pixmap.loadFromData(jpeg_data, "JPEG"):
-            self.screen_share_window.set_streamer(self.my_username, is_local=True)
-            self.screen_share_window.update_frame(pixmap)
-            self.voice_view.display_screen_frame(self.my_username, jpeg_data)
+        if self.screen_share_window.isVisible():
+            pixmap = QPixmap()
+            if pixmap.loadFromData(jpeg_data, "JPEG"):
+                self.screen_share_window.set_streamer(self.my_display_name or self.my_username, is_local=True)
+                self.screen_share_window.update_frame(pixmap)
+        self.voice_view.display_screen_frame(self.my_display_name or self.my_username, jpeg_data)
 
     def _on_screen_frame_received(self, sender_id: str, jpeg_data: bytes):
         now = time.time()
@@ -721,19 +856,35 @@ class MainWindow(QMainWindow):
 
         sender_name = sender_id
         if sender_id in self.users:
-            sender_name = self.users[sender_id].get("username", sender_id)
-        pixmap = QPixmap()
-        if pixmap.loadFromData(jpeg_data, "JPEG"):
-            self.screen_share_window.set_streamer(sender_name, is_local=False)
-            self.screen_share_window.update_frame(pixmap)
-            if not self.screen_share_window.isVisible():
-                self.screen_share_window.show()
+            sender_name = self.users[sender_id].get("display_name") or self.users[sender_id].get("username", sender_id)
+
+        # Update separate window ONLY if it's already popped out
+        if self.screen_share_window.isVisible():
+            pixmap = QPixmap()
+            if pixmap.loadFromData(jpeg_data, "JPEG"):
+                self.screen_share_window.set_streamer(sender_name, is_local=False)
+                self.screen_share_window.update_frame(pixmap)
+
+        # Always render directly in the voice stage
         self.voice_view.display_screen_frame(sender_name, jpeg_data)
 
     def _on_screen_stop_received(self, sender_id: str):
         if not self.screen_capturer.is_sharing:
             self.screen_share_window.hide()
             self.voice_view.hide_screen_share()
+
+    def _on_popout_stream(self):
+        if self.screen_share_window.isVisible():
+            self.screen_share_window.hide()
+        else:
+            self.screen_share_window.show()
+            self.screen_share_window.raise_()
+            self.screen_share_window.activateWindow()
+
+    def _on_stream_volume_changed(self, vol: float):
+        # Adjust streamer volume across all voice channel peers if streaming
+        for uid in self.users:
+            self.audio_manager.set_peer_volume(uid, vol)
 
     # ------------------ Direct Calls (1-on-1) ------------------
 
@@ -768,7 +919,7 @@ class MainWindow(QMainWindow):
         self.active_call_peer_name = peer_name
         self.udp_voice.active_call_id = call_id
 
-        self.call_banner.start(peer_name)
+        self.call_banner.start(peer_name, peer_id=peer_id)
         self.voice_bar.set_channel("Direct Call", peer_name)
         self.voice_bar.show()
         self.main_stack.setCurrentIndex(1)
@@ -782,6 +933,10 @@ class MainWindow(QMainWindow):
             {"user_id": self.my_user_id, "username": self.my_username, "avatar_color": self.my_avatar_color},
             {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
         ])
+
+    def _on_call_volume_changed(self, vol: float):
+        if getattr(self.call_banner, "peer_id", None):
+            self.audio_manager.set_peer_volume(self.call_banner.peer_id, vol)
 
     def _on_call_declined(self, call_id: str):
         self.audio_manager.stop_ringtone()
@@ -856,10 +1011,13 @@ class MainWindow(QMainWindow):
             key = self.my_user_id or self.my_username
             data[key] = {
                 "username": self.my_username,
+                "display_name": getattr(self, "my_display_name", self.my_username),
                 "bio": getattr(self, "my_bio", ""),
                 "status_text": self.my_status_text,
                 "avatar_color": self.my_avatar_color,
-                "avatar_image": getattr(self, "my_avatar_image", "")
+                "avatar_image": getattr(self, "my_avatar_image", ""),
+                "banner_color": getattr(self, "my_banner_color", "#5865F2"),
+                "banner_image": getattr(self, "my_banner_image", "")
             }
             with open(cfg_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -877,10 +1035,16 @@ class MainWindow(QMainWindow):
             key = self.my_user_id or self.my_username
             if key in data:
                 cached = data[key]
+                if not getattr(self, "my_display_name", "") and cached.get("display_name"):
+                    self.my_display_name = cached["display_name"]
                 if not getattr(self, "my_bio", "") and cached.get("bio"):
                     self.my_bio = cached["bio"]
                 if not getattr(self, "my_avatar_image", "") and cached.get("avatar_image"):
                     self.my_avatar_image = cached["avatar_image"]
+                if not getattr(self, "my_banner_color", "") and cached.get("banner_color"):
+                    self.my_banner_color = cached["banner_color"]
+                if not getattr(self, "my_banner_image", "") and cached.get("banner_image"):
+                    self.my_banner_image = cached["banner_image"]
                 if cached.get("status_text") and not self.my_status_text:
                     self.my_status_text = cached["status_text"]
         except Exception:
@@ -890,22 +1054,28 @@ class MainWindow(QMainWindow):
         user_data = {
             "user_id": self.my_user_id,
             "username": self.my_username,
+            "display_name": getattr(self, "my_display_name", self.my_username),
             "avatar_color": self.my_avatar_color,
             "avatar_image": getattr(self, "my_avatar_image", ""),
+            "banner_color": getattr(self, "my_banner_color", "#5865F2"),
+            "banner_image": getattr(self, "my_banner_image", ""),
             "bio": getattr(self, "my_bio", ""),
             "status_text": self.my_status_text
         }
         dlg = SettingsDialog(self.audio_manager, user_data, self)
 
-        def _handle_profile_update(u, s, c, img, b):
+        def _handle_profile_update(u, dname, s, c, img, bn_color, bn_img, b):
             self.my_username = u
+            self.my_display_name = dname or u
             self.my_status_text = s
             self.my_avatar_color = c
             self.my_avatar_image = img
+            self.my_banner_color = bn_color
+            self.my_banner_image = bn_img
             self.my_bio = b
-            self.user_panel.set_user(u, self.my_user_id, c, s, img)
-            self.setWindowTitle(f"VimCord — {u}")
-            self.tcp_client.send_update_profile(u, s, c, img, b)
+            self.user_panel.set_user(u, self.my_user_id, c, s, img, display_name=self.my_display_name)
+            self.setWindowTitle(f"VimCord — {self.my_display_name} (@{u})")
+            self.tcp_client.send_update_profile(u, dname, s, c, img, bn_color, bn_img, b)
             self._save_local_profile()
 
         dlg.profile_updated.connect(_handle_profile_update)
@@ -913,8 +1083,24 @@ class MainWindow(QMainWindow):
         dlg.screen_settings_changed.connect(lambda res, fps, q: self.screen_capturer.set_stream_settings(res, fps, q))
         dlg.ptt_settings_changed.connect(self._on_ptt_settings_changed)
         dlg.theme_changed.connect(self._on_theme_changed)
+        dlg.language_changed.connect(self._on_language_changed)
+        dlg.dnd_toggled.connect(self._on_dnd_toggled)
         dlg.logout_requested.connect(self._on_logout_requested)
         dlg.exec()
+
+    def _on_dnd_toggled(self, is_dnd: bool):
+        self.dnd_mode = is_dnd
+
+    def _on_language_changed(self, lang: str):
+        self.current_language = lang
+        set_language(lang)
+        self._retranslate_ui()
+
+    def _retranslate_ui(self):
+        if hasattr(self, "connection_overlay"):
+            self.connection_overlay.title_lbl.setText(t("connection_lost"))
+            self.connection_overlay.desc_lbl.setText(t("disconnected_from_server"))
+            self.connection_overlay.reconnect_btn.setText(f"🔄 {t('reconnect_now')}")
 
     def _apply_saved_theme(self):
         try:
@@ -958,10 +1144,16 @@ class MainWindow(QMainWindow):
             full_info.update(self.users[uid])
         if is_self:
             full_info["username"] = self.my_username
+            full_info["display_name"] = getattr(self, "my_display_name", self.my_username)
             full_info["avatar_color"] = self.my_avatar_color
             full_info["avatar_image"] = getattr(self, "my_avatar_image", "")
+            full_info["banner_color"] = getattr(self, "my_banner_color", "#5865F2")
+            full_info["banner_image"] = getattr(self, "my_banner_image", "")
             full_info["bio"] = getattr(self, "my_bio", "")
             full_info["status_text"] = self.my_status_text
+        else:
+            if "display_name" not in full_info or not full_info["display_name"]:
+                full_info["display_name"] = full_info.get("username", "User")
 
         dlg = UserProfileModal(full_info, is_self=is_self, is_friend=is_friend, parent=self)
         dlg.open_dm_clicked.connect(self._on_dm_user_selected)
@@ -970,7 +1162,17 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _open_my_profile(self):
-        self._open_user_profile({"user_id": self.my_user_id, "username": self.my_username})
+        self._open_user_profile({
+            "user_id": self.my_user_id,
+            "username": self.my_username,
+            "display_name": getattr(self, "my_display_name", self.my_username),
+            "avatar_color": self.my_avatar_color,
+            "avatar_image": getattr(self, "my_avatar_image", ""),
+            "banner_color": getattr(self, "my_banner_color", "#5865F2"),
+            "banner_image": getattr(self, "my_banner_image", ""),
+            "bio": getattr(self, "my_bio", ""),
+            "status_text": self.my_status_text
+        })
 
     def _on_logout_requested(self):
         try:
@@ -985,6 +1187,8 @@ class MainWindow(QMainWindow):
 
     def _on_peer_speaking(self, user_id: str, is_speaking: bool):
         self.voice_view.set_user_speaking(user_id, is_speaking)
+        if user_id == self.my_user_id:
+            self.user_panel.set_speaking(is_speaking)
 
     def _refresh_voice_stage_users(self):
         if not self.current_voice_channel_id or not self.current_room_id:
@@ -1157,11 +1361,55 @@ class MainWindow(QMainWindow):
         if getattr(self, "_is_closing", False):
             return
         self.voice_bar.hide()
-        self.voice_view.hide()
+        self.voice_view.hide_screen_share()
         self.call_banner.stop()
         self.audio_manager.stop()
         self.udp_voice.stop()
-        QMessageBox.critical(self, "Disconnected", "Connection to the VimCord server has been lost.")
+        if hasattr(self, "connection_overlay"):
+            self.connection_overlay.show_overlay()
+
+    def _on_reconnect_requested(self):
+        cfg = load_config()
+        host = cfg.get("host", self.server_host)
+        port = cfg.get("tcp_port", self.server_tcp_port)
+        if not self.tcp_client.connect_to_server(host, port):
+            if hasattr(self, "connection_overlay"):
+                self.connection_overlay.set_reconnect_failed()
+            return
+
+        uname = cfg.get("username", self.my_username)
+        pwd = cfg.get("saved_password", "")
+        if uname and pwd:
+            self.tcp_client.send_login(uname, pwd)
+        else:
+            if hasattr(self, "connection_overlay"):
+                self.connection_overlay.set_reconnect_failed()
+
+    def _on_reconnect_login_resp(self, ok: bool, data: dict):
+        if ok:
+            if hasattr(self, "connection_overlay"):
+                self.connection_overlay.hide_overlay()
+            rooms = data.get("rooms", [])
+            users = data.get("users", [])
+            friends = data.get("friends", [])
+            self.rooms = {r["room_id"]: r for r in rooms}
+            self.users = {u["user_id"]: u for u in users}
+            self.friends = friends
+            self.server_nav.set_rooms(list(self.rooms.values()))
+            self.channel_list.set_friends(friends)
+            self.friends_view.set_friends(friends)
+            self.friends_view.set_online_users(self.users)
+            self.audio_manager.start()
+            self.udp_voice.start(self.my_user_id, self.server_host, self.server_udp_port)
+            self.ping_timer.start()
+        else:
+            if hasattr(self, "connection_overlay") and self.connection_overlay.isVisible():
+                self.connection_overlay.set_reconnect_failed()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "connection_overlay") and self.connection_overlay.isVisible():
+            self.connection_overlay.resize(self.size())
 
     def _on_leave_room(self, room_id: str):
         ret = QMessageBox.question(
@@ -1206,16 +1454,24 @@ class MainWindow(QMainWindow):
         k = event.key()
         if self.ptt_key == "Space" and k == Qt.Key.Key_Space:
             return True
-        if self.ptt_key == "Ctrl" and k in (Qt.Key.Key_Control,):
+        if self.ptt_key in ("Ctrl", "Control") and k in (Qt.Key.Key_Control,):
             return True
         if self.ptt_key == "Shift" and k in (Qt.Key.Key_Shift,):
             return True
         if self.ptt_key == "Alt" and k in (Qt.Key.Key_Alt,):
             return True
-        if self.ptt_key == "Caps" and k == Qt.Key.Key_CapsLock:
+        if self.ptt_key in ("Caps", "Caps Lock") and k == Qt.Key.Key_CapsLock:
+            return True
+        if self.ptt_key in ("Return", "Enter") and k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            return True
+        if self.ptt_key == "Tab" and k == Qt.Key.Key_Tab:
             return True
         text = event.text().upper()
         if text and text == self.ptt_key.upper():
+            return True
+        from PyQt6.QtGui import QKeySequence
+        seq = QKeySequence(k).toString()
+        if seq and seq.upper() == self.ptt_key.upper():
             return True
         return False
 

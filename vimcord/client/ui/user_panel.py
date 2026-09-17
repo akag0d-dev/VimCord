@@ -121,17 +121,30 @@ class UserPanel(QWidget):
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.settings_btn)
 
-    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "Online", avatar_image: str = ""):
+    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "Online", avatar_image: str = "", display_name: str = ""):
         self.username = username
+        self.display_name = display_name or username
         self.user_id = user_id
         self.avatar_color = avatar_color
         self.avatar_image = avatar_image
         self.status_text = status_text
-        self.name_label.setText(username)
+        self.name_label.setText(self.display_name)
         self.status_label.setText(status_text or "Online")
-        pixmap = get_round_avatar_pixmap(36, username, avatar_color, avatar_image)
+        pixmap = get_round_avatar_pixmap(36, self.display_name, avatar_color, avatar_image)
         self.avatar_label.setPixmap(pixmap)
         self.avatar_label.setStyleSheet("background: transparent; border: none;")
+
+    def set_speaking(self, is_speaking: bool):
+        if is_speaking:
+            self.avatar_label.setStyleSheet("""
+                QLabel {
+                    border: 2px solid #23a55a;
+                    border-radius: 18px;
+                    background-color: transparent;
+                }
+            """)
+        else:
+            self.avatar_label.setStyleSheet("background: transparent; border: none;")
 
     def _toggle_mic(self):
         self.is_muted = not self.is_muted

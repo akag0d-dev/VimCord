@@ -184,16 +184,22 @@ class TCPClient:
             "target_id": target_id
         })
 
-    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None, bio: Optional[str] = None):
+    def send_update_profile(self, username: Optional[str] = None, display_name: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None, banner_color: Optional[str] = None, banner_image: Optional[str] = None, bio: Optional[str] = None):
         msg = {"type": "update_profile"}
         if username:
             msg["username"] = username
+        if display_name is not None:
+            msg["display_name"] = display_name
         if status_text is not None:
             msg["status_text"] = status_text
         if avatar_color:
             msg["avatar_color"] = avatar_color
         if avatar_image is not None:
             msg["avatar_image"] = avatar_image
+        if banner_color:
+            msg["banner_color"] = banner_color
+        if banner_image is not None:
+            msg["banner_image"] = banner_image
         if bio is not None:
             msg["bio"] = bio
         self.send_message(msg)
@@ -213,8 +219,8 @@ class TCPClient:
     def send_leave_voice(self):
         self.send_message({"type": "leave_voice"})
 
-    def send_chat_message(self, target_type: str, target_id: str, content: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0):
-        self.send_message({
+    def send_chat_message(self, target_type: str, target_id: str, content: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0, msg_id: str = ""):
+        payload = {
             "type": "send_msg",
             "target_type": target_type,
             "target_id": target_id,
@@ -225,7 +231,10 @@ class TCPClient:
             "file_data": file_data,
             "file_name": file_name,
             "file_size": file_size
-        })
+        }
+        if msg_id:
+            payload["msg_id"] = msg_id
+        self.send_message(payload)
 
     def send_call_start(self, target_user_id: str):
         self.send_message({"type": "call_start", "target_user_id": target_user_id})

@@ -139,7 +139,10 @@ class TCPServer:
                         avatar_color=u_data.get("avatar_color", "#5865F2"),
                         status_text=u_data.get("status_text", "В сети"),
                         avatar_image=u_data.get("avatar_image", ""),
-                        bio=u_data.get("bio", "")
+                        bio=u_data.get("bio", ""),
+                        display_name=u_data.get("display_name", u_data["username"]),
+                        banner_color=u_data.get("banner_color", "#5865F2"),
+                        banner_image=u_data.get("banner_image", "")
                     )
 
                     # Return full initial state - send user's rooms (isolation)
@@ -150,8 +153,11 @@ class TCPServer:
                         "success": True,
                         "user_id": current_user.user_id,
                         "username": current_user.username,
+                        "display_name": current_user.display_name,
                         "avatar_color": current_user.avatar_color,
                         "avatar_image": current_user.avatar_image,
+                        "banner_color": current_user.banner_color,
+                        "banner_image": current_user.banner_image,
                         "bio": current_user.bio,
                         "status_text": current_user.status_text,
                         "rooms": user_rooms,
@@ -202,9 +208,10 @@ class TCPServer:
                     file_data = msg.get("file_data", "")
                     file_name = msg.get("file_name", "")
                     file_size = int(msg.get("file_size", 0))
+                    client_msg_id = msg.get("msg_id")
                     if content or image_data or voice_data or file_data:
                         now = time.time()
-                        msg_id = "msg-" + uuid.uuid4().hex[:8]
+                        msg_id = client_msg_id if client_msg_id else ("msg-" + uuid.uuid4().hex[:8])
                         if t_type == "channel":
                             db_key = t_id
                         else:
@@ -212,7 +219,7 @@ class TCPServer:
 
                         # Save to database
                         self.db.save_message(
-                            msg_id, t_type, db_key, current_user.user_id, current_user.username,
+                            msg_id, t_type, db_key, current_user.user_id, current_user.display_name or current_user.username,
                             content, now, image_data=image_data, voice_data=voice_data, voice_duration=voice_duration,
                             file_data=file_data, file_name=file_name, file_size=file_size
                         )
@@ -224,6 +231,7 @@ class TCPServer:
                             "target_id": t_id,
                             "sender_id": current_user.user_id,
                             "sender_name": current_user.username,
+                            "display_name": current_user.display_name,
                             "avatar_color": current_user.avatar_color,
                             "avatar_image": current_user.avatar_image,
                             "content": content,
@@ -424,27 +432,39 @@ class TCPServer:
                 # 11. PROFILE UPDATE & PASSWORD CHANGE
                 elif msg_type == "update_profile":
                     new_uname = msg.get("username")
+                    new_dname = msg.get("display_name")
                     new_status = msg.get("status_text")
                     new_color = msg.get("avatar_color")
                     new_avatar = msg.get("avatar_image")
+                    new_bcolor = msg.get("banner_color")
+                    new_bimage = msg.get("banner_image")
                     new_bio = msg.get("bio")
                     ok, res_msg = self.db.update_profile(
                         current_user.user_id,
                         username=new_uname,
+                        display_name=new_dname,
                         status_text=new_status,
                         avatar_color=new_color,
                         avatar_image=new_avatar,
+                        banner_color=new_bcolor,
+                        banner_image=new_bimage,
                         bio=new_bio
                     )
                     if ok:
                         if new_uname:
                             current_user.username = new_uname
+                        if new_dname is not None:
+                            current_user.display_name = new_dname or current_user.username
                         if new_status is not None:
                             current_user.status_text = new_status
                         if new_color:
                             current_user.avatar_color = new_color
                         if new_avatar is not None:
                             current_user.avatar_image = new_avatar
+                        if new_bcolor:
+                            current_user.banner_color = new_bcolor
+                        if new_bimage is not None:
+                            current_user.banner_image = new_bimage
                         if new_bio is not None:
                             current_user.bio = new_bio
 

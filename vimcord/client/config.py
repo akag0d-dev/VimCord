@@ -36,7 +36,7 @@ def get_config_file() -> Path:
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "host": "127.0.0.1",
+    "host": "194.226.123.199",
     "tcp_port": DEFAULT_TCP_PORT,
     "udp_port": DEFAULT_UDP_PORT,
     "username": "",
@@ -44,6 +44,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "auto_login": False,
     "language": "en",
     "theme": "dark",
+    "dnd_mode": False,
+    "ptt_key": "Space",
+    "stream_volume": 100,
+    "call_volume": 100,
 }
 
 

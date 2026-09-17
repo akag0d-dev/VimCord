@@ -20,9 +20,10 @@ class VoiceUserWidget(QWidget):
     clicked = pyqtSignal(dict)
     right_clicked = pyqtSignal(dict, object)
 
-    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, parent=None):
+    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, display_name: str = "", parent=None):
         super().__init__(parent)
         self.username = username
+        self.display_name = display_name or username
         self.user_id = user_id
         self.avatar_color = avatar_color
         self.avatar_image = avatar_image
@@ -53,7 +54,7 @@ class VoiceUserWidget(QWidget):
         name_row.setSpacing(3)
         name_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.name_label = QLabel(self.username)
+        self.name_label = QLabel(self.display_name)
         self.name_label.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px;")
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_row.addWidget(self.name_label)
@@ -77,7 +78,7 @@ class VoiceUserWidget(QWidget):
             self.badge_label.hide()
 
     def _set_avatar_style(self, speaking: bool):
-        pixmap = get_round_avatar_pixmap(54, self.username, self.avatar_color, self.avatar_image)
+        pixmap = get_round_avatar_pixmap(54, self.display_name, self.avatar_color, self.avatar_image)
         self.avatar.setPixmap(pixmap)
         if speaking:
             self.avatar.setStyleSheet("""
@@ -111,6 +112,7 @@ class VoiceUserWidget(QWidget):
         data = {
             "user_id": self.user_id,
             "username": self.username,
+            "display_name": self.display_name,
             "avatar_color": self.avatar_color,
             "avatar_image": self.avatar_image,
             "is_muted": self.is_muted,
@@ -136,6 +138,9 @@ class VoiceView(QWidget):
     user_profile_requested = pyqtSignal(dict) # user_dict
     peer_volume_changed = pyqtSignal(str, float) # user_id, volume
     peer_mute_toggled = pyqtSignal(str, bool)    # user_id, muted
+    popout_stream_requested = pyqtSignal()
+    stream_volume_changed = pyqtSignal(float)
+    watch_stream_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,6 +151,9 @@ class VoiceView(QWidget):
         self.peer_muted: set = set()
         self.user_widgets: Dict[str, VoiceUserWidget] = {}
         self.is_screen_sharing = False
+        self.is_watching_stream = True
+        self.last_jpeg_data: Optional[bytes] = None
+        self.last_sender_name: str = ""
 
         self._init_ui()
 
@@ -208,11 +216,67 @@ class VoiceView(QWidget):
         self.screen_container = QWidget()
         self.screen_container.setStyleSheet("background-color: #1e1f22; border-radius: 8px;")
         sc_layout = QVBoxLayout(self.screen_container)
-        sc_layout.setContentsMargins(6, 6, 6, 6)
+        sc_layout.setContentsMargins(8, 6, 8, 8)
+        sc_layout.setSpacing(6)
+
+        # Stream Controls Header
+        stream_ctrl_bar = QHBoxLayout()
+        stream_ctrl_bar.setContentsMargins(0, 0, 0, 0)
+        stream_ctrl_bar.setSpacing(8)
 
         self.screen_title = QLabel("🖥️ Screen Share")
-        self.screen_title.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold;")
-        sc_layout.addWidget(self.screen_title)
+        self.screen_title.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: bold;")
+        stream_ctrl_bar.addWidget(self.screen_title)
+
+        stream_ctrl_bar.addStretch(1)
+
+        # Stream Volume Slider
+        vol_ico = QLabel("🔊")
+        vol_ico.setStyleSheet("color: #949ba4; font-size: 11px;")
+        stream_ctrl_bar.addWidget(vol_ico)
+
+        self.stream_vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.stream_vol_slider.setRange(0, 200)
+        self.stream_vol_slider.setValue(100)
+        self.stream_vol_slider.setFixedWidth(75)
+        self.stream_vol_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #35373c; border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #5865F2; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #ffffff; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+        """)
+        self.stream_vol_slider.valueChanged.connect(self._on_stream_volume_slide)
+        stream_ctrl_bar.addWidget(self.stream_vol_slider)
+
+        self.stream_vol_lbl = QLabel("100%")
+        self.stream_vol_lbl.setStyleSheet("color: #949ba4; font-size: 11px; min-width: 32px;")
+        stream_ctrl_bar.addWidget(self.stream_vol_lbl)
+
+        # Watch / Hide Stream button
+        self.toggle_watch_btn = QPushButton("🙈 Hide Stream")
+        self.toggle_watch_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #35373c; color: #dbdee1; font-size: 11px;
+                font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;
+            }
+            QPushButton:hover { background-color: #404249; color: #ffffff; }
+        """)
+        self.toggle_watch_btn.clicked.connect(self._toggle_watch_stream)
+        stream_ctrl_bar.addWidget(self.toggle_watch_btn)
+
+        # Pop-out button (↗️)
+        self.popout_stream_btn = QPushButton("↗️ Pop-out")
+        self.popout_stream_btn.setToolTip("Open stream in separate window")
+        self.popout_stream_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #35373c; color: #dbdee1; font-size: 11px;
+                font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;
+            }
+            QPushButton:hover { background-color: #404249; color: #ffffff; }
+        """)
+        self.popout_stream_btn.clicked.connect(self.popout_stream_requested.emit)
+        stream_ctrl_bar.addWidget(self.popout_stream_btn)
+
+        sc_layout.addLayout(stream_ctrl_bar)
 
         self.screen_display = QLabel()
         self.screen_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -251,6 +315,7 @@ class VoiceView(QWidget):
         for idx, u in enumerate(users):
             uid = u.get("user_id")
             uname = u.get("username", "User")
+            dname = u.get("display_name") or uname
             color = u.get("avatar_color", "#5865F2")
             avatar_img = u.get("avatar_image", "")
             is_muted = u.get("is_muted", False)
@@ -261,7 +326,8 @@ class VoiceView(QWidget):
                 avatar_color=color,
                 avatar_image=avatar_img,
                 is_muted=is_muted,
-                is_deafened=is_deaf
+                is_deafened=is_deaf,
+                display_name=dname
             )
             w.clicked.connect(self.user_profile_requested.emit)
             w.right_clicked.connect(self._on_user_right_clicked)
@@ -408,8 +474,29 @@ class VoiceView(QWidget):
 
         self.screen_share_toggled.emit(self.is_screen_sharing)
 
+    def _on_stream_volume_slide(self, val: int):
+        self.stream_vol_lbl.setText(f"{val}%")
+        self.stream_volume_changed.emit(val / 100.0)
+
+    def _toggle_watch_stream(self):
+        self.is_watching_stream = not self.is_watching_stream
+        if self.is_watching_stream:
+            self.toggle_watch_btn.setText("🙈 Hide Stream")
+            if self.last_jpeg_data:
+                self.display_screen_frame(self.last_sender_name, self.last_jpeg_data)
+        else:
+            self.toggle_watch_btn.setText("👁️ Watch Stream")
+            self.screen_display.clear()
+            self.screen_display.setText("Stream hidden\nClick 'Watch Stream' to view")
+            self.screen_display.setStyleSheet("background-color: #000000; color: #949ba4; font-size: 14px; border-radius: 6px;")
+        self.watch_stream_toggled.emit(self.is_watching_stream)
+
     def display_screen_frame(self, sender_name: str, jpeg_data: bytes):
         """Renders received screen share JPEG frame onto the viewport."""
+        self.last_jpeg_data = jpeg_data
+        self.last_sender_name = sender_name
+        if not self.is_watching_stream:
+            return
         pixmap = QPixmap()
         if pixmap.loadFromData(jpeg_data, "JPEG"):
             self.screen_title.setText(f"🖥️ {sender_name}'s Screen")
@@ -425,3 +512,4 @@ class VoiceView(QWidget):
     def hide_screen_share(self):
         self.screen_container.hide()
         self.screen_display.clear()
+        self.last_jpeg_data = None

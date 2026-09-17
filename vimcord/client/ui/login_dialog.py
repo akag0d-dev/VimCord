@@ -30,7 +30,7 @@ class LoginDialog(QDialog):
 
         # Loaded config defaults from AppData
         saved_cfg = load_config()
-        self.server_host = saved_cfg.get("host", "127.0.0.1")
+        self.server_host = saved_cfg.get("host", "194.226.123.199")
         self.tcp_port = saved_cfg.get("tcp_port", DEFAULT_TCP_PORT)
         self.udp_port = saved_cfg.get("udp_port", DEFAULT_UDP_PORT)
         self.username = default_username or saved_cfg.get("username", "")
@@ -172,12 +172,12 @@ class LoginDialog(QDialog):
         r_layout.setContentsMargins(20, 20, 20, 20)
         r_layout.setSpacing(8)
 
-        lbl_ru = QLabel("DESIRED USERNAME:")
+        lbl_ru = QLabel("DESIRED USERNAME (English letters, numbers, _, -):")
         lbl_ru.setStyleSheet("color: #b5bac1; font-weight: bold; font-size: 11px;")
         r_layout.addWidget(lbl_ru)
 
         self.reg_user_input = QLineEdit()
-        self.reg_user_input.setPlaceholderText("Choose a username...")
+        self.reg_user_input.setPlaceholderText("Choose a username (e.g. alex_cool)...")
         self.reg_user_input.setStyleSheet("""
             QLineEdit {
                 background-color: #1e1f22; color: #ffffff; border: 1px solid #383a40;
@@ -236,45 +236,24 @@ class LoginDialog(QDialog):
         self.tabs.addTab(tab_reg, "Register")
         main_layout.addWidget(self.tabs, 1)
 
-        # Server Settings Row (Host & Ports)
+        # Server Settings Row (Host only, port removed)
         srv_box = QWidget()
-        srv_layout = QHBoxLayout(srv_box)
+        srv_layout = QVBoxLayout(srv_box)
         srv_layout.setContentsMargins(0, 4, 0, 0)
-        srv_layout.setSpacing(10)
+        srv_layout.setSpacing(4)
 
-        v_host = QVBoxLayout()
-        v_host.setSpacing(4)
         lbl_sh = QLabel("SERVER ADDRESS:")
         lbl_sh.setStyleSheet("color: #80848e; font-size: 11px; font-weight: bold;")
-        v_host.addWidget(lbl_sh)
+        srv_layout.addWidget(lbl_sh)
         self.host_input = QLineEdit()
         self.host_input.setText(self.server_host)
         self.host_input.setStyleSheet("""
             QLineEdit {
                 background-color: #1e1f22; color: #dbdee1; border: 1px solid #383a40;
-                border-radius: 6px; padding: 6px 10px; font-size: 13px;
+                border-radius: 6px; padding: 7px 10px; font-size: 13px;
             }
         """)
-        v_host.addWidget(self.host_input)
-        srv_layout.addLayout(v_host, 2)
-
-        v_port = QVBoxLayout()
-        v_port.setSpacing(4)
-        lbl_sp = QLabel("PORT:")
-        lbl_sp.setStyleSheet("color: #80848e; font-size: 11px; font-weight: bold;")
-        v_port.addWidget(lbl_sp)
-        self.port_input = QSpinBox()
-        self.port_input.setRange(1024, 65535)
-        self.port_input.setValue(self.tcp_port)
-        self.port_input.setStyleSheet("""
-            QSpinBox {
-                background-color: #1e1f22; color: #dbdee1; border: 1px solid #383a40;
-                border-radius: 6px; padding: 6px 10px; font-size: 13px;
-            }
-        """)
-        v_port.addWidget(self.port_input)
-        srv_layout.addLayout(v_port, 1)
-
+        srv_layout.addWidget(self.host_input)
         main_layout.addWidget(srv_box)
 
     def _on_login_click(self):
@@ -299,20 +278,26 @@ class LoginDialog(QDialog):
         self.username = uname
         self.password = passwd
         self.server_host = host
-        self.tcp_port = self.port_input.value()
-        self.udp_port = self.tcp_port + 1
+        self.tcp_port = DEFAULT_TCP_PORT
+        self.udp_port = DEFAULT_UDP_PORT
         self.auto_login = self.auto_login_cb.isChecked()
         self._save_current_config()
         self.accept()
 
     def _on_register_click(self):
+        import re
         uname = self.reg_user_input.text().strip()
         p1 = self.reg_pass_input.text().strip()
         p2 = self.reg_pass2_input.text().strip()
         host = self.host_input.text().strip()
 
-        if not uname or len(uname) < 2:
-            QMessageBox.warning(self, "Validation Error", "Username must be at least 2 characters!")
+        username_regex = re.compile(r"^[a-zA-Z0-9_-]{2,32}$")
+        if not uname or not username_regex.match(uname):
+            QMessageBox.warning(
+                self,
+                "Validation Error",
+                "Username must be 2-32 characters long and consist only of English letters, numbers, hyphens, and underscores."
+            )
             self.reg_user_input.setFocus()
             return
         if not p1 or len(p1) < 4:
@@ -332,8 +317,8 @@ class LoginDialog(QDialog):
         self.username = uname
         self.password = p1
         self.server_host = host
-        self.tcp_port = self.port_input.value()
-        self.udp_port = self.tcp_port + 1
+        self.tcp_port = DEFAULT_TCP_PORT
+        self.udp_port = DEFAULT_UDP_PORT
         self.auto_login = True
         self._save_current_config()
         self.accept()

@@ -5,7 +5,7 @@ Call UI components: incoming call dialog and active 1-on-1 call banner.
 import time
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider
 )
 
 
@@ -80,6 +80,7 @@ class IncomingCallDialog(QDialog):
 
 class ActiveCallBanner(QWidget):
     end_call_clicked = pyqtSignal()
+    volume_changed = pyqtSignal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,6 +95,7 @@ class ActiveCallBanner(QWidget):
         """)
 
         self.start_time: float = 0.0
+        self.peer_id: str = ""
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._update_timer)
@@ -117,6 +119,27 @@ class ActiveCallBanner(QWidget):
         self.timer_lbl.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
         layout.addWidget(self.timer_lbl)
 
+        # Call Volume Slider
+        vol_ico = QLabel("🔊")
+        vol_ico.setStyleSheet("font-size: 14px; color: white;")
+        layout.addWidget(vol_ico)
+
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 200)
+        self.vol_slider.setValue(100)
+        self.vol_slider.setFixedWidth(80)
+        self.vol_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: rgba(0, 0, 0, 0.3); border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #ffffff; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #ffffff; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+        """)
+        self.vol_slider.valueChanged.connect(self._on_vol_slide)
+        layout.addWidget(self.vol_slider)
+
+        self.vol_lbl = QLabel("100%")
+        self.vol_lbl.setStyleSheet("color: white; font-size: 11px; min-width: 32px;")
+        layout.addWidget(self.vol_lbl)
+
         self.end_btn = QPushButton("End Call")
         self.end_btn.setStyleSheet("""
             QPushButton {
@@ -134,7 +157,12 @@ class ActiveCallBanner(QWidget):
         self.end_btn.clicked.connect(self.end_call_clicked.emit)
         layout.addWidget(self.end_btn)
 
-    def start(self, peer_name: str):
+    def _on_vol_slide(self, val: int):
+        self.vol_lbl.setText(f"{val}%")
+        self.volume_changed.emit(val / 100.0)
+
+    def start(self, peer_name: str, peer_id: str = ""):
+        self.peer_id = peer_id
         self.info_lbl.setText(f"Call: {peer_name}")
         self.start_time = time.time()
         self.timer_lbl.setText("00:00")

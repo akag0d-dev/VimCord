@@ -6,12 +6,14 @@ round avatars, photo attachments, voice messages, message deletion, and member l
 import base64
 import datetime
 import os
+import re
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QByteArray, QBuffer, QIODevice, QUrl
 from PyQt6.QtGui import QDesktopServices, QPixmap, QIcon, QTextDocument, QImage
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTextBrowser, QFileDialog, QFrame, QMessageBox
+    QPushButton, QTextBrowser, QFileDialog, QFrame, QMessageBox, QMenu
 )
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
@@ -25,6 +27,8 @@ class ChatView(QWidget):
     play_voice_requested = pyqtSignal(str)
     # toggle right member list
     toggle_members_requested = pyqtSignal()
+    # open profile modal: user_id
+    open_profile_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,6 +111,8 @@ class ChatView(QWidget):
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
         self.browser.anchorClicked.connect(self._on_anchor_clicked)
+        self.browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.browser.customContextMenuRequested.connect(self._on_browser_context_menu)
         self.browser.setStyleSheet("""
             QTextBrowser {
                 background-color: #313338;
@@ -321,6 +327,7 @@ class ChatView(QWidget):
         msg_id = msg.get("msg_id", "")
         sender_id = msg.get("sender_id", "")
         sender = msg.get("sender_name", "User")
+        sender_display = msg.get("display_name") or sender
         content = msg.get("content", "")
         ts = msg.get("timestamp", 0)
         avatar_color = msg.get("avatar_color", "#5865F2")
@@ -340,12 +347,29 @@ class ChatView(QWidget):
             .replace("\n", "<br/>")
         )
 
+        # Highlight @everyone and mentions
+        content_escaped = re.sub(
+            r"@everyone\b",
+            "<span style='background-color: rgba(88, 101, 242, 0.35); color: #c9cdfb; padding: 2px 4px; border-radius: 3px; font-weight: 600;'>@everyone</span>",
+            content_escaped
+        )
+        content_escaped = re.sub(
+            r"@([a-zA-Z0-9_-]{2,32})\b",
+            r"<span style='background-color: rgba(88, 101, 242, 0.35); color: #c9cdfb; padding: 2px 4px; border-radius: 3px; font-weight: 600;'>@\1</span>",
+            content_escaped
+        )
+
         # 1. Round Avatar registered as Qt Document Image Resource
-        av_pixmap = get_round_avatar_pixmap(36, sender, avatar_color, avatar_image)
-        av_key = f"av_{abs(hash(sender + avatar_color + avatar_image[:20]))}"
+        av_pixmap = get_round_avatar_pixmap(36, sender_display, avatar_color, avatar_image)
+        av_key = f"av_{abs(hash(sender_display + avatar_color + avatar_image[:20]))}"
         av_url = QUrl(f"res://avatar/{av_key}.png")
         self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, av_url, av_pixmap.toImage())
-        avatar_html = f"<img src='res://avatar/{av_key}.png' width='36' height='36' />"
+        if sender_id:
+            avatar_html = f"<a href='user_profile:{sender_id}' style='text-decoration: none;' title='View Profile'><img src='res://avatar/{av_key}.png' width='36' height='36' /></a>"
+            sender_html = f"<a href='user_profile:{sender_id}' style='color: #5865F2; font-weight: bold; font-size: 14px; text-decoration: none;' title='View Profile'>{sender_display}</a>"
+        else:
+            avatar_html = f"<img src='res://avatar/{av_key}.png' width='36' height='36' />"
+            sender_html = f"<span style='color: #5865F2; font-weight: bold; font-size: 14px;'>{sender_display}</span>"
 
         # 2. Delete button for own messages
         delete_html = ""
@@ -375,6 +399,9 @@ class ChatView(QWidget):
                         <a href='view_image:{msg_id}' style='text-decoration: none;' title='Click to view full size'>
                             <img src='res://img/{img_key}.jpg' width='{qimg.width()}' height='{qimg.height()}' style='border-radius: 6px;' />
                         </a>
+                        <div style='margin-top: 4px;'>
+                            <a href='save_image:{msg_id}' style='color: #00a8fc; text-decoration: none; font-size: 11px; font-weight: bold;' title='Save to Downloads'>⬇️ Download</a>
+                        </div>
                     </div>
                     """
             except Exception:
@@ -417,7 +444,7 @@ class ChatView(QWidget):
                             <div style='color: #949ba4; font-size: 11px; margin-top: 2px;'>{size_str}</div>
                         </td>
                         <td style='text-align: right; vertical-align: middle; width: 64px;'>
-                            <a href='save_file:{msg_id}' style='background-color: #383a40; color: #ffffff; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;'>Save</a>
+                            <a href='save_file:{msg_id}' style='background-color: #383a40; color: #ffffff; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;' title='Save directly to Downloads'>Save</a>
                         </td>
                     </tr>
                 </table>
@@ -444,7 +471,7 @@ class ChatView(QWidget):
                         {avatar_html}
                     </td>
                     <td style='vertical-align: top; padding-left: 8px;'>
-                        <span style='color: #5865F2; font-weight: bold; font-size: 14px;'>{sender}</span>
+                        {sender_html}
                         <span style='color: #949ba4; font-size: 11px; margin-left: 8px;'>{time_str}</span>
                         {delete_html}
                         {f"<div style='color: #dbdee1; margin-top: 4px; font-size: 14px; line-height: 1.4;'>{content_escaped}</div>" if content else ""}
@@ -462,12 +489,50 @@ class ChatView(QWidget):
         sb = self.browser.verticalScrollBar()
         sb.setValue(sb.maximum())
 
+    def _on_browser_context_menu(self, pos):
+        menu = QMenu(self)
+        anchor = self.browser.anchorAt(pos)
+        selected = self.browser.textCursor().selectedText()
+        if selected:
+            copy_act = menu.addAction("Copy")
+            copy_act.triggered.connect(self.browser.copy)
+
+        if anchor.startswith("delete:"):
+            msg_id = anchor.removeprefix("delete:")
+            del_act = menu.addAction("🗑️ Delete Message")
+            del_act.triggered.connect(lambda: self.delete_message_requested.emit(msg_id, "channel" if self.is_channel else "dm", self.current_target_id))
+        elif anchor.startswith("user_profile:"):
+            uid = anchor.removeprefix("user_profile:")
+            p_act = menu.addAction("👤 View Profile")
+            p_act.triggered.connect(lambda: self.open_profile_requested.emit(uid))
+        elif anchor.startswith("save_file:"):
+            msg_id = anchor.removeprefix("save_file:")
+            dl_act = menu.addAction("⬇️ Download File")
+            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_file:{msg_id}")))
+        elif anchor.startswith("save_image:"):
+            msg_id = anchor.removeprefix("save_image:")
+            dl_act = menu.addAction("⬇️ Download Image")
+            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_image:{msg_id}")))
+        elif anchor.startswith("view_image:"):
+            msg_id = anchor.removeprefix("view_image:")
+            view_act = menu.addAction("🔍 View Image")
+            view_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"view_image:{msg_id}")))
+            dl_act = menu.addAction("⬇️ Download Image")
+            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_image:{msg_id}")))
+
+        if not menu.isEmpty():
+            menu.exec(self.browser.mapToGlobal(pos))
+
     def _on_anchor_clicked(self, url: QUrl):
         url_str = url.toString()
         if url_str.startswith("delete:"):
             msg_id = url_str.removeprefix("delete:")
             target_type = "channel" if self.is_channel else "dm"
             self.delete_message_requested.emit(msg_id, target_type, self.current_target_id)
+        elif url_str.startswith("user_profile:"):
+            sender_id = url_str.removeprefix("user_profile:")
+            if sender_id:
+                self.open_profile_requested.emit(sender_id)
         elif url_str.startswith("save_file:"):
             msg_id = url_str.removeprefix("save_file:")
             messages = self.message_cache.get(self.current_target_id, [])
@@ -475,17 +540,48 @@ class ChatView(QWidget):
             if msg and msg.get("file_data"):
                 raw_b64 = msg["file_data"]
                 fname = msg.get("file_name", "download")
-                save_path, _ = QFileDialog.getSaveFileName(self, "Save File", fname, "All Files (*.*)")
-                if save_path:
-                    try:
-                        clean_b64 = raw_b64
-                        if "," in clean_b64:
-                            clean_b64 = clean_b64.split(",", 1)[1]
-                        data = base64.b64decode(clean_b64)
-                        with open(save_path, "wb") as f:
-                            f.write(data)
-                    except Exception as e:
-                        QMessageBox.critical(self, "Download Error", f"Failed to save file: {e}")
+                dl_dir = Path.home() / "Downloads"
+                dl_dir.mkdir(parents=True, exist_ok=True)
+                target_path = dl_dir / fname
+                counter = 1
+                base, ext = os.path.splitext(fname)
+                while target_path.exists():
+                    target_path = dl_dir / f"{base}_{counter}{ext}"
+                    counter += 1
+                try:
+                    clean_b64 = raw_b64
+                    if "," in clean_b64:
+                        clean_b64 = clean_b64.split(",", 1)[1]
+                    data = base64.b64decode(clean_b64)
+                    with open(target_path, "wb") as f:
+                        f.write(data)
+                    QMessageBox.information(self, "Downloaded", f"Saved to Downloads:\n{target_path.name}")
+                except Exception as e:
+                    QMessageBox.critical(self, "Download Error", f"Failed to save file: {e}")
+        elif url_str.startswith("save_image:"):
+            msg_id = url_str.removeprefix("save_image:")
+            messages = self.message_cache.get(self.current_target_id, [])
+            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+            if msg and msg.get("image_data"):
+                raw_b64 = msg["image_data"]
+                fname = f"image_{msg_id[:8]}.png"
+                dl_dir = Path.home() / "Downloads"
+                dl_dir.mkdir(parents=True, exist_ok=True)
+                target_path = dl_dir / fname
+                counter = 1
+                while target_path.exists():
+                    target_path = dl_dir / f"image_{msg_id[:8]}_{counter}.png"
+                    counter += 1
+                try:
+                    clean_b64 = raw_b64
+                    if "," in clean_b64:
+                        clean_b64 = clean_b64.split(",", 1)[1]
+                    data = base64.b64decode(clean_b64)
+                    with open(target_path, "wb") as f:
+                        f.write(data)
+                    QMessageBox.information(self, "Downloaded", f"Saved to Downloads:\n{target_path.name}")
+                except Exception as e:
+                    QMessageBox.critical(self, "Download Error", f"Failed to save image: {e}")
         elif url_str.startswith("view_image:"):
             msg_id = url_str.removeprefix("view_image:")
             messages = self.message_cache.get(self.current_target_id, [])

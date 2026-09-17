@@ -1,10 +1,7 @@
-"""
-User Profile Modal dialog for VimCord.
-Displays custom avatar, username, ID, status, "About Me" bio, and action buttons.
-"""
-
+import base64
 from typing import Dict, Any, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QFrame
 )
@@ -22,8 +19,10 @@ class UserProfileModal(QDialog):
         self.is_self = is_self
         self.is_friend = is_friend
 
-        self.setWindowTitle(f"Profile - {user_data.get('username', 'User')}")
-        self.setFixedSize(340, 430)
+        uname = user_data.get("username", "User")
+        dname = user_data.get("display_name") or uname
+        self.setWindowTitle(f"Profile - {dname}")
+        self.setFixedSize(360, 480)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._init_ui()
@@ -34,39 +33,58 @@ class UserProfileModal(QDialog):
         main_layout.setSpacing(0)
 
         username = self.user_data.get("username", "User")
+        display_name = self.user_data.get("display_name") or username
         user_id = self.user_data.get("user_id", "")
         avatar_color = self.user_data.get("avatar_color", "#5865F2")
         avatar_image = self.user_data.get("avatar_image", "")
+        banner_color = self.user_data.get("banner_color", "#5865F2")
+        banner_image = self.user_data.get("banner_image", "")
         status_text = self.user_data.get("status_text", "Online")
         is_online = self.user_data.get("online", True)
 
-        # 1. Header Banner
-        banner = QWidget()
-        banner.setFixedHeight(80)
-        banner.setStyleSheet(f"background-color: {avatar_color}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
-        main_layout.addWidget(banner)
+        # 1. Header Banner (Custom color or image)
+        banner_lbl = QLabel()
+        banner_lbl.setFixedHeight(110)
+        if banner_image:
+            try:
+                clean_b64 = banner_image
+                if "," in clean_b64:
+                    clean_b64 = clean_b64.split(",", 1)[1]
+                raw_bytes = base64.b64decode(clean_b64)
+                pm = QPixmap()
+                if pm.loadFromData(raw_bytes):
+                    scaled_pm = pm.scaled(360, 110, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                    banner_lbl.setPixmap(scaled_pm)
+                    banner_lbl.setScaledContents(True)
+                else:
+                    banner_lbl.setStyleSheet(f"background-color: {banner_color}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
+            except Exception:
+                banner_lbl.setStyleSheet(f"background-color: {banner_color}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
+        else:
+            banner_lbl.setStyleSheet(f"background-color: {banner_color}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
+        main_layout.addWidget(banner_lbl)
 
         # 2. Content Container (Dark background)
         content_w = QWidget()
         content_w.setStyleSheet("background-color: #111214; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;")
         content_layout = QVBoxLayout(content_w)
         content_layout.setContentsMargins(18, 0, 18, 18)
-        content_layout.setSpacing(10)
+        content_layout.setSpacing(8)
 
-        # Avatar overlapping banner
+        # Enlarged avatar (84px) overlapping banner
         avatar_container = QHBoxLayout()
-        avatar_container.setContentsMargins(0, -35, 0, 0)
+        avatar_container.setContentsMargins(0, -42, 0, 0)
 
         self.avatar_lbl = QLabel()
-        self.avatar_lbl.setFixedSize(68, 68)
+        self.avatar_lbl.setFixedSize(84, 84)
         self.avatar_lbl.setStyleSheet("""
             QLabel {
-                border: 4px solid #111214;
-                border-radius: 34px;
+                border: 5px solid #111214;
+                border-radius: 42px;
                 background-color: #111214;
             }
         """)
-        pixmap = get_round_avatar_pixmap(60, username, avatar_color, avatar_image)
+        pixmap = get_round_avatar_pixmap(74, display_name, avatar_color, avatar_image)
         self.avatar_lbl.setPixmap(pixmap)
         self.avatar_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         avatar_container.addWidget(self.avatar_lbl)
@@ -74,14 +92,14 @@ class UserProfileModal(QDialog):
 
         content_layout.addLayout(avatar_container)
 
-        # Username & tag
-        name_lbl = QLabel(username)
-        name_lbl.setStyleSheet("font-size: 19px; font-weight: bold; color: #ffffff;")
+        # Display Name (Prominent) & @username underneath
+        name_lbl = QLabel(display_name)
+        name_lbl.setStyleSheet("font-size: 20px; font-weight: 800; color: #ffffff;")
         content_layout.addWidget(name_lbl)
 
-        uid_lbl = QLabel(f"ID: {user_id}")
-        uid_lbl.setStyleSheet("font-size: 11px; color: #949ba4;")
-        content_layout.addWidget(uid_lbl)
+        user_tag_lbl = QLabel(f"@{username}")
+        user_tag_lbl.setStyleSheet("font-size: 13px; color: #949ba4; font-weight: 500;")
+        content_layout.addWidget(user_tag_lbl)
 
         # Online Status
         status_box = QHBoxLayout()
@@ -139,25 +157,25 @@ class UserProfileModal(QDialog):
             dm_btn.clicked.connect(self._on_dm_clicked)
             btn_layout.addWidget(dm_btn)
 
-            call_btn = QPushButton("📞 Call")
-            call_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #23a55a; color: #ffffff; font-weight: bold;
-                    border-radius: 4px; padding: 8px 12px; font-size: 13px; border: none;
-                }
-                QPushButton:hover { background-color: #1f9450; }
-            """)
-            call_btn.clicked.connect(self._on_call_clicked)
-            btn_layout.addWidget(call_btn)
-
-            if not self.is_friend:
+            if self.is_friend:
+                call_btn = QPushButton("📞 Call")
+                call_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #23a55a; color: #ffffff; font-weight: bold;
+                        border-radius: 4px; padding: 8px 12px; font-size: 13px; border: none;
+                    }
+                    QPushButton:hover { background-color: #1f9450; }
+                """)
+                call_btn.clicked.connect(self._on_call_clicked)
+                btn_layout.addWidget(call_btn)
+            else:
                 friend_btn = QPushButton("➕ Add Friend")
                 friend_btn.setStyleSheet("""
                     QPushButton {
-                        background-color: #4e5058; color: #ffffff; font-weight: bold;
-                        border-radius: 4px; padding: 8px 10px; font-size: 13px; border: none;
+                        background-color: #23a55a; color: #ffffff; font-weight: bold;
+                        border-radius: 4px; padding: 8px 12px; font-size: 13px; border: none;
                     }
-                    QPushButton:hover { background-color: #6d6f78; }
+                    QPushButton:hover { background-color: #1f9450; }
                 """)
                 friend_btn.clicked.connect(self._on_add_friend_clicked)
                 btn_layout.addWidget(friend_btn)

@@ -56,6 +56,18 @@ class Database:
                 cur.execute("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''")
             except Exception:
                 pass
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN banner_color TEXT DEFAULT '#5865F2'")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN banner_image TEXT DEFAULT ''")
+            except Exception:
+                pass
 
             # 2. Rooms (Servers) table
             cur.execute("""
@@ -184,13 +196,16 @@ class Database:
     def _hash_password(password: str, salt: str) -> str:
         return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
 
-    def register_user(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    def register_user(self, username: str, password: str, display_name: Optional[str] = None) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """Registers a new user. Returns (success, message, user_dict)."""
+        import re
         username = username.strip()
-        if not username or len(username) < 2:
-            return False, "Имя пользователя должно содержать не менее 2 символов", None
+        if not username or not re.match(r"^[a-zA-Z0-9_-]{2,32}$", username):
+            return False, "Username must be 2-32 characters (English letters, digits, '_' or '-' only)", None
         if not password or len(password) < 4:
-            return False, "Пароль должен содержать не менее 4 символов", None
+            return False, "Password must be at least 4 characters", None
+
+        disp_name = (display_name or "").strip() or username
 
         # Choose a random aesthetic Discord color
         colors = ["#5865F2", "#57F287", "#FEE75C", "#EB459E", "#ED4245", "#9B59B6", "#1ABC9C"]
@@ -205,10 +220,10 @@ class Database:
             try:
                 cur.execute(
                     """
-                    INSERT INTO users (user_id, username, password_hash, salt, status_text, avatar_color, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (user_id, username, display_name, password_hash, salt, status_text, avatar_color, banner_color, banner_image, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (user_id, username, pwd_hash, salt, "В сети", avatar_color, now)
+                    (user_id, username, disp_name, pwd_hash, salt, "Online", avatar_color, "#5865F2", "", now)
                 )
                 # Auto add to default room
                 cur.execute(
@@ -217,15 +232,18 @@ class Database:
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
-                return False, "Пользователь с таким именем уже существует", None
+                return False, "User with this username already exists", None
 
-        return True, "Успешная регистрация", {
+        return True, "Registration successful", {
             "user_id": user_id,
             "username": username,
-            "status_text": "В сети",
+            "display_name": disp_name,
+            "status_text": "Online",
             "avatar_color": avatar_color,
             "avatar_image": "",
-            "bio": ""
+            "bio": "",
+            "banner_color": "#5865F2",
+            "banner_image": ""
         }
 
     def authenticate_user(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
@@ -236,29 +254,42 @@ class Database:
             cur.execute("SELECT * FROM users WHERE username = ?", (username,))
             row = cur.fetchone()
             if not row:
-                return False, "Пользователь не найден", None
+                return False, "User not found", None
 
             user_dict = dict(row)
             expected_hash = self._hash_password(password, user_dict["salt"])
             if secrets.compare_digest(expected_hash, user_dict["password_hash"]):
-                return True, "Успешный вход", {
+                disp_name = user_dict.get("display_name") or user_dict["username"]
+                return True, "Login successful", {
                     "user_id": user_dict["user_id"],
                     "username": user_dict["username"],
-                    "status_text": user_dict.get("status_text", "В сети"),
+                    "display_name": disp_name,
+                    "status_text": user_dict.get("status_text", "Online"),
                     "avatar_color": user_dict.get("avatar_color", "#5865F2"),
                     "avatar_image": user_dict.get("avatar_image", ""),
-                    "bio": user_dict.get("bio", "")
+                    "bio": user_dict.get("bio", ""),
+                    "banner_color": user_dict.get("banner_color", "#5865F2"),
+                    "banner_image": user_dict.get("banner_image", "")
                 }
-            return False, "Неверный пароль", None
+            return False, "Invalid password", None
 
-    def update_profile(self, user_id: str, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None, bio: Optional[str] = None) -> Tuple[bool, str]:
+    def update_profile(self, user_id: str, username: Optional[str] = None, display_name: Optional[str] = None,
+                       status_text: Optional[str] = None, avatar_color: Optional[str] = None,
+                       avatar_image: Optional[str] = None, bio: Optional[str] = None,
+                       banner_color: Optional[str] = None, banner_image: Optional[str] = None) -> Tuple[bool, str]:
         with self._get_conn() as conn:
             cur = conn.cursor()
             updates = []
             params = []
             if username:
+                import re
+                if not re.match(r"^[a-zA-Z0-9_-]{2,32}$", username.strip()):
+                    return False, "Username must be 2-32 characters, English letters, digits, '_' or '-' only."
                 updates.append("username = ?")
                 params.append(username.strip())
+            if display_name is not None:
+                updates.append("display_name = ?")
+                params.append(display_name.strip())
             if status_text is not None:
                 updates.append("status_text = ?")
                 params.append(status_text.strip())
@@ -271,48 +302,54 @@ class Database:
             if bio is not None:
                 updates.append("bio = ?")
                 params.append(bio.strip())
+            if banner_color:
+                updates.append("banner_color = ?")
+                params.append(banner_color)
+            if banner_image is not None:
+                updates.append("banner_image = ?")
+                params.append(banner_image)
 
             if not updates:
-                return True, "Нет изменений"
+                return True, "No changes"
 
             params.append(user_id)
             try:
                 cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", params)
                 conn.commit()
-                return True, "Профиль успешно обновлен"
+                return True, "Profile updated successfully"
             except sqlite3.IntegrityError:
-                return False, "Имя пользователя уже занято"
+                return False, "Username is already taken"
 
     def change_password(self, user_id: str, old_pass: str, new_pass: str) -> Tuple[bool, str]:
         if len(new_pass) < 4:
-            return False, "Новый пароль должен быть не менее 4 символов"
+            return False, "New password must be at least 4 characters"
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT password_hash, salt FROM users WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
             if not row:
-                return False, "Пользователь не найден"
+                return False, "User not found"
 
             if not secrets.compare_digest(self._hash_password(old_pass, row["salt"]), row["password_hash"]):
-                return False, "Неверный текущий пароль"
+                return False, "Invalid current password"
 
             new_salt = secrets.token_hex(16)
             new_hash = self._hash_password(new_pass, new_salt)
             cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE user_id = ?", (new_hash, new_salt, user_id))
             conn.commit()
-            return True, "Пароль успешно изменен"
+            return True, "Password changed successfully"
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT user_id, username, COALESCE(NULLIF(display_name, ''), username) as display_name, status_text, avatar_color, avatar_image, bio, COALESCE(banner_color, '#5865F2') as banner_color, COALESCE(banner_image, '') as banner_image FROM users WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
             return dict(row) if row else None
 
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users WHERE username = ?", (username,))
+            cur.execute("SELECT user_id, username, COALESCE(NULLIF(display_name, ''), username) as display_name, status_text, avatar_color, avatar_image, bio, COALESCE(banner_color, '#5865F2') as banner_color, COALESCE(banner_image, '') as banner_image FROM users WHERE username = ?", (username,))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -320,7 +357,7 @@ class Database:
         """Returns all registered users from the database."""
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio, created_at FROM users ORDER BY username ASC")
+            cur.execute("SELECT user_id, username, COALESCE(NULLIF(display_name, ''), username) as display_name, status_text, avatar_color, avatar_image, bio, COALESCE(banner_color, '#5865F2') as banner_color, COALESCE(banner_image, '') as banner_image, created_at FROM users ORDER BY username ASC")
             rows = cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -384,7 +421,8 @@ class Database:
                        COALESCE(m.file_name, '') as file_name,
                        COALESCE(m.file_size, 0) as file_size,
                        COALESCE(u.avatar_color, '#5865F2') as avatar_color,
-                       COALESCE(u.avatar_image, '') as avatar_image
+                       COALESCE(u.avatar_image, '') as avatar_image,
+                       COALESCE(NULLIF(u.display_name, ''), m.sender_name) as display_name
                 FROM messages m
                 LEFT JOIN users u ON m.sender_id = u.user_id
                 WHERE m.target_id = ?
@@ -462,7 +500,7 @@ class Database:
             cur.execute(
                 """
                 SELECT f.user_id, f.friend_id, f.status,
-                       u.user_id as peer_id, u.username, u.status_text, u.avatar_color, u.avatar_image
+                       u.user_id as peer_id, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) as display_name, u.status_text, u.avatar_color, u.avatar_image, COALESCE(u.banner_color, '#5865F2') as banner_color, COALESCE(u.banner_image, '') as banner_image
                 FROM friendships f
                 JOIN users u ON (u.user_id = CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END)
                 WHERE f.user_id = ? OR f.friend_id = ?
@@ -476,9 +514,12 @@ class Database:
                 results.append({
                     "peer_id": row["peer_id"],
                     "username": row["username"],
+                    "display_name": row["display_name"],
                     "status_text": row["status_text"],
                     "avatar_color": row["avatar_color"],
                     "avatar_image": row["avatar_image"] or "",
+                    "banner_color": row["banner_color"],
+                    "banner_image": row["banner_image"] or "",
                     "friendship_status": row["status"],
                     "is_incoming": is_incoming,
                     "is_outgoing": is_outgoing
@@ -613,11 +654,11 @@ class Database:
         with self._get_conn() as conn:
             cur = conn.cursor()
             if room_id == "room-default":
-                cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users")
+                cur.execute("SELECT user_id, username, COALESCE(NULLIF(display_name, ''), username) as display_name, status_text, avatar_color, avatar_image, bio, COALESCE(banner_color, '#5865F2') as banner_color, COALESCE(banner_image, '') as banner_image FROM users")
                 return [dict(row) for row in cur.fetchall()]
             cur.execute(
                 """
-                SELECT u.user_id, u.username, u.status_text, u.avatar_color, u.avatar_image, u.bio
+                SELECT u.user_id, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) as display_name, u.status_text, u.avatar_color, u.avatar_image, u.bio, COALESCE(u.banner_color, '#5865F2') as banner_color, COALESCE(u.banner_image, '') as banner_image
                 FROM room_members rm
                 JOIN users u ON rm.user_id = u.user_id
                 WHERE rm.room_id = ?

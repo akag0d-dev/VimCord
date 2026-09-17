@@ -184,6 +184,9 @@ def main():
     status_text = login_data.get("status_text", "Online")
     if status_text == "В сети":
         status_text = "Online"
+    display_name = login_data.get("display_name") or logged_in_name
+    banner_color = login_data.get("banner_color", "#5865F2")
+    banner_image = login_data.get("banner_image", "")
     rooms = login_data.get("rooms", [])
     users = login_data.get("users", [])
     friends = login_data.get("friends", [])
@@ -201,7 +204,10 @@ def main():
         host=server_host,
         udp_port=udp_port,
         avatar_image=avatar_image,
-        bio=bio
+        bio=bio,
+        display_name=display_name,
+        banner_color=banner_color,
+        banner_image=banner_image
     )
     main_win.show()
 

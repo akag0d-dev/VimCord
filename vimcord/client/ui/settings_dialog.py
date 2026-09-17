@@ -5,29 +5,33 @@ Voice Activity (VAD) / Push-to-Talk (PTT), Noise Gate toggle, and Screen Share p
 """
 
 from typing import Dict, Any, Optional
+import re
+import json
+from pathlib import Path
+import base64
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QPixmap, QKeySequence, QKeyEvent
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSlider, QProgressBar, QStackedWidget,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QFileDialog,
     QRadioButton, QCheckBox, QScrollArea, QButtonGroup
 )
-import json
-from pathlib import Path
-import base64
 from vimcord.client.config import load_config, save_config
 from vimcord.client.audio.audio_manager import AudioManager
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.i18n import t, set_language
 
 
 class SettingsDialog(QDialog):
-    profile_updated = pyqtSignal(str, str, str, str, str)  # username, status_text, avatar_color, avatar_image, bio
-    password_changed = pyqtSignal(str, str)                 # old_pass, new_pass
+    profile_updated = pyqtSignal(str, str, str, str, str, str, str, str)  # username, display_name, status_text, avatar_color, avatar_image, banner_color, banner_image, bio
+    password_changed = pyqtSignal(str, str)                                 # old_pass, new_pass
     logout_requested = pyqtSignal()
-    screen_settings_changed = pyqtSignal(str, int, int)     # resolution, fps, quality
-    ptt_settings_changed = pyqtSignal(bool, str)            # ptt_mode, ptt_key
-    theme_changed = pyqtSignal(str)                         # "dark", "amoled", "light"
-    language_changed = pyqtSignal(str)                      # "ru", "en"
+    screen_settings_changed = pyqtSignal(str, int, int)                     # resolution, fps, quality
+    ptt_settings_changed = pyqtSignal(bool, str)                            # ptt_mode, ptt_key
+    theme_changed = pyqtSignal(str)                                         # "dark", "amoled", "light"
+    language_changed = pyqtSignal(str)                                      # "ru", "en"
+    dnd_toggled = pyqtSignal(bool)
 
     DISCORD_COLORS = [
         ("#5865F2", "Blurple"),
@@ -45,20 +49,26 @@ class SettingsDialog(QDialog):
         self.user_data = user_data
 
         self.username = user_data.get("username", "User")
+        self.display_name = user_data.get("display_name") or self.username
         self.user_id = user_data.get("user_id", "")
         self.status_text = user_data.get("status_text", "Online")
         self.avatar_color = user_data.get("avatar_color", "#5865F2")
         self.avatar_image = user_data.get("avatar_image", "")
+        self.banner_color = user_data.get("banner_color", "#5865F2")
+        self.banner_image = user_data.get("banner_image", "")
         self.bio = user_data.get("bio", "")
         self.selected_color = self.avatar_color
+        self.selected_banner_color = self.banner_color
 
         cfg = load_config()
         self.current_theme = cfg.get("theme", "dark")
         self.current_language = cfg.get("language", "en")
+        self.dnd_mode = cfg.get("dnd_mode", False)
 
         self.ptt_mode = getattr(self.audio_manager, "ptt_mode", False)
-        self.ptt_key = getattr(parent, "ptt_key", "Space") if parent else "Space"
+        self.ptt_key = cfg.get("ptt_key", "Space")
         self.noise_suppression = getattr(self.audio_manager, "noise_suppression", True)
+        self._is_recording_key = False
 
         self.setWindowTitle("Settings — VimCord")
         self.resize(780, 560)
@@ -156,34 +166,77 @@ class SettingsDialog(QDialog):
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         layout.addWidget(title)
 
-        # Profile Card Banner
+        # Profile Card Banner Preview
         card = QWidget()
-        card.setStyleSheet("background-color: #1e1f22; border-radius: 8px; padding: 14px;")
-        c_layout = QHBoxLayout(card)
-        c_layout.setSpacing(16)
+        card.setStyleSheet("background-color: #1e1f22; border-radius: 8px;")
+        card_l = QVBoxLayout(card)
+        card_l.setContentsMargins(0, 0, 0, 14)
+        card_l.setSpacing(0)
+
+        self.banner_preview = QLabel()
+        self.banner_preview.setFixedHeight(85)
+        self._refresh_banner_preview()
+        card_l.addWidget(self.banner_preview)
+
+        # Avatar and user info row overlapping banner
+        top_av_box = QHBoxLayout()
+        top_av_box.setContentsMargins(14, -30, 14, 0)
+        top_av_box.setSpacing(14)
 
         self.avatar_preview = QLabel()
-        self.avatar_preview.setFixedSize(54, 54)
+        self.avatar_preview.setFixedSize(60, 60)
+        self.avatar_preview.setStyleSheet("border: 3px solid #1e1f22; border-radius: 30px; background-color: #1e1f22;")
         self.avatar_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._refresh_avatar_preview()
-        c_layout.addWidget(self.avatar_preview)
+        top_av_box.addWidget(self.avatar_preview)
 
         info_l = QVBoxLayout()
+        info_l.setContentsMargins(0, 30, 0, 0)
         info_l.setSpacing(2)
-        self.card_name_lbl = QLabel(self.username)
-        self.card_name_lbl.setStyleSheet("color: #ffffff; font-size: 16px; font-weight: bold;")
-        info_l.addWidget(self.card_name_lbl)
+        self.card_dname_lbl = QLabel(self.display_name)
+        self.card_dname_lbl.setStyleSheet("color: #ffffff; font-size: 16px; font-weight: bold;")
+        info_l.addWidget(self.card_dname_lbl)
 
-        id_lbl = QLabel(f"ID: {self.user_id}")
-        id_lbl.setStyleSheet("color: #949ba4; font-size: 11px;")
-        info_l.addWidget(id_lbl)
+        self.card_uname_lbl = QLabel(f"@{self.username} • ID: {self.user_id}")
+        self.card_uname_lbl.setStyleSheet("color: #949ba4; font-size: 11px;")
+        info_l.addWidget(self.card_uname_lbl)
 
-        self.card_status_lbl = QLabel(self.status_text)
+        self.card_status_lbl = QLabel(self.status_text or "Online")
         self.card_status_lbl.setStyleSheet("color: #23a55a; font-size: 12px;")
         info_l.addWidget(self.card_status_lbl)
-        c_layout.addLayout(info_l, 1)
+
+        top_av_box.addLayout(info_l, 1)
+        card_l.addLayout(top_av_box)
 
         layout.addWidget(card)
+
+        # Banner Upload / Remove Row
+        bn_btns_row = QHBoxLayout()
+        bn_btns_row.setSpacing(10)
+
+        upload_bn_btn = QPushButton("🖼️ Upload Banner Image")
+        upload_bn_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4e5058; color: white; font-weight: bold;
+                padding: 6px 12px; border-radius: 4px; border: none; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #6d6f78; }
+        """)
+        upload_bn_btn.clicked.connect(self._on_upload_banner)
+        bn_btns_row.addWidget(upload_bn_btn)
+
+        remove_bn_btn = QPushButton("✕ Reset Banner Image")
+        remove_bn_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #f23f43; border: 1px solid #f23f43;
+                padding: 6px 12px; border-radius: 4px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #f23f43; color: white; }
+        """)
+        remove_bn_btn.clicked.connect(self._on_remove_banner)
+        bn_btns_row.addWidget(remove_bn_btn)
+        bn_btns_row.addStretch(1)
+        layout.addLayout(bn_btns_row)
 
         # Avatar Upload / Remove Row
         av_btns_row = QHBoxLayout()
@@ -214,7 +267,13 @@ class SettingsDialog(QDialog):
         layout.addLayout(av_btns_row)
 
         # Profile Edits Form
-        layout.addWidget(QLabel("DISPLAY NAME:"))
+        layout.addWidget(QLabel("DISPLAY NAME (Visible to other members):"))
+        self.dname_edit = QLineEdit(self.display_name)
+        self.dname_edit.setPlaceholderText("Enter your display name (e.g. Alex 🔥, Алексей)...")
+        self.dname_edit.setStyleSheet("background-color: #1e1f22; color: #ffffff; padding: 8px; border-radius: 4px; border: none;")
+        layout.addWidget(self.dname_edit)
+
+        layout.addWidget(QLabel("USERNAME (@username, English letters, numbers, _, -):"))
         self.uname_edit = QLineEdit(self.username)
         self.uname_edit.setStyleSheet("background-color: #1e1f22; color: #ffffff; padding: 8px; border-radius: 4px; border: none;")
         layout.addWidget(self.uname_edit)
@@ -293,9 +352,51 @@ class SettingsDialog(QDialog):
         scroll.setWidget(w)
         return scroll
 
+    def _refresh_banner_preview(self):
+        if self.banner_image:
+            try:
+                clean_b64 = self.banner_image
+                if "," in clean_b64:
+                    clean_b64 = clean_b64.split(",", 1)[1]
+                raw_bytes = base64.b64decode(clean_b64)
+                pm = QPixmap()
+                if pm.loadFromData(raw_bytes):
+                    scaled = pm.scaled(520, 85, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                    self.banner_preview.setPixmap(scaled)
+                    self.banner_preview.setScaledContents(True)
+                    return
+            except Exception:
+                pass
+        self.banner_preview.clear()
+        self.banner_preview.setStyleSheet(f"background-color: {self.selected_banner_color}; border-top-left-radius: 8px; border-top-right-radius: 8px;")
+
+    def _on_upload_banner(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Banner Image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, "rb") as f:
+                raw = f.read()
+            if len(raw) > 2 * 1024 * 1024:
+                QMessageBox.warning(self, "File Too Large", "Please select a banner image under 2 MB.")
+                return
+            b64 = base64.b64encode(raw).decode("utf-8")
+            self.banner_image = b64
+            self._refresh_banner_preview()
+            QMessageBox.information(self, "Banner Selected", "Banner image loaded! Click 'Save Changes' to apply.")
+        except Exception as e:
+            QMessageBox.critical(self, "Upload Error", f"Failed to read file: {e}")
+
+    def _on_remove_banner(self):
+        self.banner_image = ""
+        self._refresh_banner_preview()
+
     def _refresh_avatar_preview(self):
         pixmap = get_round_avatar_pixmap(
-            54, self.username, self.selected_color, self.avatar_image
+            54, self.display_name or self.username, self.selected_color, self.avatar_image
         )
         self.avatar_preview.setPixmap(pixmap)
 
@@ -325,18 +426,25 @@ class SettingsDialog(QDialog):
 
     def _select_avatar_color(self, hex_code: str):
         self.selected_color = hex_code
+        self.selected_banner_color = hex_code
         self._refresh_avatar_preview()
+        self._refresh_banner_preview()
         for btn, h in self.color_buttons:
             border = "2px solid #ffffff" if h == hex_code else "none"
             btn.setStyleSheet(f"background-color: {hex_code}; border-radius: 14px; border: {border};")
 
     def _on_save_profile(self):
+        new_dname = self.dname_edit.text().strip() or self.username
         new_name = self.uname_edit.text().strip()
         new_status = self.status_edit.text().strip()
         new_bio = self.bio_edit.text().strip()
 
-        if not new_name:
-            QMessageBox.warning(self, "Error", "Username cannot be empty!")
+        username_regex = re.compile(r"^[a-zA-Z0-9_-]{2,32}$")
+        if not new_name or not username_regex.match(new_name):
+            QMessageBox.warning(
+                self, "Validation Error",
+                "Username must be 2-32 characters long and consist only of English letters, numbers, hyphens, and underscores."
+            )
             return
 
         # Check if username already exists in MainWindow.users
@@ -350,14 +458,21 @@ class SettingsDialog(QDialog):
                         return
 
         self.username = new_name
+        self.display_name = new_dname
         self.status_text = new_status
         self.bio = new_bio
         self.avatar_color = self.selected_color
+        self.banner_color = self.selected_banner_color
 
-        self.card_name_lbl.setText(new_name)
+        self.card_dname_lbl.setText(self.display_name)
+        self.card_uname_lbl.setText(f"@{self.username} • ID: {self.user_id}")
         self.card_status_lbl.setText(new_status or "Online")
 
-        self.profile_updated.emit(new_name, new_status, self.selected_color, self.avatar_image, new_bio)
+        self.profile_updated.emit(
+            self.username, self.display_name, self.status_text,
+            self.selected_color, self.avatar_image,
+            self.selected_banner_color, self.banner_image, self.bio
+        )
         QMessageBox.information(self, "Success", "Profile updated successfully!")
 
     def _on_change_password(self):
@@ -431,32 +546,119 @@ class SettingsDialog(QDialog):
         # 3. Input Mode: VAD vs PTT
         layout.addWidget(QLabel("INPUT MODE:"))
         mode_box = QHBoxLayout()
+        mode_box.setSpacing(12)
+
+        vad_card = QWidget()
+        vad_card.setStyleSheet("""
+            QWidget {
+                background-color: #2b2d31; border: 1px solid #383a40; border-radius: 6px; padding: 6px;
+            }
+        """)
+        vad_layout = QVBoxLayout(vad_card)
+        vad_layout.setContentsMargins(10, 8, 10, 8)
         self.vad_radio = QRadioButton("Voice Activity (VAD)")
-        self.ptt_radio = QRadioButton("Push-to-Talk")
+        self.vad_radio.setStyleSheet("""
+            QRadioButton {
+                color: #ffffff; font-weight: bold; font-size: 13px;
+            }
+            QRadioButton::indicator {
+                width: 16px; height: 16px; border-radius: 8px; border: 2px solid #80848e; background: #1e1f22;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #23a55a; border-color: #23a55a;
+            }
+        """)
+        vad_hint = QLabel("Automatically transmits audio when speaking.")
+        vad_hint.setStyleSheet("color: #949ba4; font-size: 11px; margin-left: 22px;")
+        vad_layout.addWidget(self.vad_radio)
+        vad_layout.addWidget(vad_hint)
+        mode_box.addWidget(vad_card, 1)
+
+        ptt_card = QWidget()
+        ptt_card.setStyleSheet("""
+            QWidget {
+                background-color: #2b2d31; border: 1px solid #383a40; border-radius: 6px; padding: 6px;
+            }
+        """)
+        ptt_layout = QVBoxLayout(ptt_card)
+        ptt_layout.setContentsMargins(10, 8, 10, 8)
+        self.ptt_radio = QRadioButton("Push-to-Talk (PTT)")
+        self.ptt_radio.setStyleSheet("""
+            QRadioButton {
+                color: #ffffff; font-weight: bold; font-size: 13px;
+            }
+            QRadioButton::indicator {
+                width: 16px; height: 16px; border-radius: 8px; border: 2px solid #80848e; background: #1e1f22;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #5865F2; border-color: #5865F2;
+            }
+        """)
+        ptt_hint = QLabel("Transmits only when assigned keybind is held.")
+        ptt_hint.setStyleSheet("color: #949ba4; font-size: 11px; margin-left: 22px;")
+        ptt_layout.addWidget(self.ptt_radio)
+        ptt_layout.addWidget(ptt_hint)
+        mode_box.addWidget(ptt_card, 1)
+
+        self.input_mode_group = QButtonGroup(self)
+        self.input_mode_group.addButton(self.vad_radio)
+        self.input_mode_group.addButton(self.ptt_radio)
+
         if self.ptt_mode:
             self.ptt_radio.setChecked(True)
         else:
             self.vad_radio.setChecked(True)
 
-        mode_box.addWidget(self.vad_radio)
-        mode_box.addWidget(self.ptt_radio)
-        mode_box.addStretch(1)
         layout.addLayout(mode_box)
 
-        # Hotkey row
-        key_row = QHBoxLayout()
-        key_row.addWidget(QLabel("Push-to-Talk Shortcut:"))
+        # Push to Talk Keybind Section
+        self.ptt_key_container = QWidget()
+        ptt_key_l = QHBoxLayout(self.ptt_key_container)
+        ptt_key_l.setContentsMargins(0, 4, 0, 4)
+        ptt_key_l.setSpacing(10)
+
+        ptt_key_lbl_title = QLabel("Push-to-Talk Keybind:")
+        ptt_key_lbl_title.setStyleSheet("color: #dbdee1; font-weight: bold; font-size: 13px;")
+        ptt_key_l.addWidget(ptt_key_lbl_title)
+
+        self.ptt_key_badge = QLabel(self.ptt_key)
+        self.ptt_key_badge.setStyleSheet("""
+            background-color: #1e1f22; color: #5865F2; font-weight: bold;
+            font-size: 13px; padding: 6px 14px; border: 1px solid #5865F2; border-radius: 4px;
+        """)
+        ptt_key_l.addWidget(self.ptt_key_badge)
+
+        self.record_key_btn = QPushButton("⌨️ Record Keybind")
+        self.record_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4e5058; color: white; font-weight: bold;
+                padding: 6px 14px; border-radius: 4px; border: none; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #6d6f78; }
+        """)
+        self.record_key_btn.clicked.connect(self._start_recording_key)
+        ptt_key_l.addWidget(self.record_key_btn)
+
         self.ptt_combo = QComboBox()
-        self.ptt_combo.addItems(["Space", "V", "B", "C", "X", "Caps Lock"])
+        self.ptt_combo.addItems(["Space", "V", "B", "C", "X", "Caps Lock", "Shift", "Control", "Alt"])
         idx = self.ptt_combo.findText(self.ptt_key)
         if idx >= 0:
             self.ptt_combo.setCurrentIndex(idx)
-        key_row.addWidget(self.ptt_combo)
-        key_row.addStretch(1)
-        layout.addLayout(key_row)
+        self.ptt_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1e1f22; color: #ffffff; border: 1px solid #383a40;
+                border-radius: 4px; padding: 4px 8px; font-size: 12px;
+            }
+        """)
+        self.ptt_combo.currentTextChanged.connect(self._on_ptt_key_combo_changed)
+        ptt_key_l.addWidget(self.ptt_combo)
+        ptt_key_l.addStretch(1)
+
+        layout.addWidget(self.ptt_key_container)
+        self.ptt_key_container.setVisible(self.ptt_mode)
 
         self.vad_radio.toggled.connect(self._on_input_mode_changed)
-        self.ptt_combo.currentTextChanged.connect(self._on_ptt_key_changed)
+        self.ptt_radio.toggled.connect(self._on_input_mode_changed)
 
         # 4. Noise Suppression
         self.noise_cb = QCheckBox("Noise Suppression (Noise Gate)")
@@ -524,14 +726,60 @@ class SettingsDialog(QDialog):
         scroll.setWidget(w)
         return scroll
 
+    def _start_recording_key(self):
+        self._is_recording_key = True
+        self.record_key_btn.setText("Press any key...")
+        self.record_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ed4245; color: white; font-weight: bold;
+                padding: 6px 14px; border-radius: 4px; border: none; font-size: 12px;
+            }
+        """)
+        self.setFocus()
+
+    def _update_record_btn_ui(self):
+        self.record_key_btn.setText("⌨️ Record Keybind")
+        self.record_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4e5058; color: white; font-weight: bold;
+                padding: 6px 14px; border-radius: 4px; border: none; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #6d6f78; }
+        """)
+        self.ptt_key_badge.setText(self.ptt_key)
+        idx = self.ptt_combo.findText(self.ptt_key)
+        if idx >= 0:
+            self.ptt_combo.setCurrentIndex(idx)
+
+    def _on_ptt_key_combo_changed(self, key_text: str):
+        if not self._is_recording_key and key_text:
+            self.ptt_key = key_text
+            self.ptt_key_badge.setText(self.ptt_key)
+            self._on_ptt_key_changed(self.ptt_key)
+
     def _on_input_mode_changed(self):
         is_ptt = self.ptt_radio.isChecked()
         self.audio_manager.set_ptt_mode(is_ptt)
-        self.ptt_settings_changed.emit(is_ptt, self.ptt_combo.currentText())
+        if hasattr(self, "ptt_key_container"):
+            self.ptt_key_container.setVisible(is_ptt)
+        self.ptt_settings_changed.emit(is_ptt, self.ptt_key)
+        try:
+            cfg = load_config()
+            cfg["ptt_mode"] = is_ptt
+            save_config(cfg)
+        except Exception:
+            pass
 
     def _on_ptt_key_changed(self, key_text: str):
         is_ptt = self.ptt_radio.isChecked()
+        self.ptt_key = key_text
         self.ptt_settings_changed.emit(is_ptt, key_text)
+        try:
+            cfg = load_config()
+            cfg["ptt_key"] = key_text
+            save_config(cfg)
+        except Exception:
+            pass
 
     def _on_screen_settings_changed(self):
         res = self.sc_res_combo.currentText()
@@ -674,9 +922,45 @@ class SettingsDialog(QDialog):
         self.lang_combo.currentIndexChanged.connect(self._on_language_changed)
         layout.addWidget(self.lang_combo)
 
+        # 3. Notifications & DND Section
+        dnd_title = QLabel("🔕 Notifications & Do Not Disturb")
+        dnd_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff; margin-top: 14px;")
+        layout.addWidget(dnd_title)
+
+        dnd_desc = QLabel("Suppress desktop toast notifications:")
+        dnd_desc.setStyleSheet("color: #949ba4; font-size: 13px;")
+        layout.addWidget(dnd_desc)
+
+        self.dnd_cb = QCheckBox("Do Not Disturb (Disable desktop popups)")
+        self.dnd_cb.setStyleSheet("""
+            QCheckBox {
+                color: #ffffff; font-size: 14px; font-weight: bold; spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 18px; height: 18px; border-radius: 4px;
+                border: 2px solid #80848e; background-color: #1e1f22;
+            }
+            QCheckBox::indicator:checked {
+                border-color: #f23f43; background-color: #f23f43;
+            }
+        """)
+        self.dnd_cb.setChecked(self.dnd_mode)
+        self.dnd_cb.toggled.connect(self._on_dnd_toggled)
+        layout.addWidget(self.dnd_cb)
+
         layout.addStretch(1)
         scroll.setWidget(w)
         return scroll
+
+    def _on_dnd_toggled(self, checked: bool):
+        self.dnd_mode = checked
+        self.dnd_toggled.emit(checked)
+        try:
+            cfg = load_config()
+            cfg["dnd_mode"] = checked
+            save_config(cfg)
+        except Exception:
+            pass
 
     def _on_theme_toggled(self, button: QRadioButton, checked: bool):
         if checked:
@@ -688,6 +972,7 @@ class SettingsDialog(QDialog):
     def _on_language_changed(self, index: int):
         lang_key = self.lang_combo.currentData()
         self.current_language = lang_key
+        set_language(lang_key)
         self.language_changed.emit(lang_key)
         self._save_theme_and_lang()
 
@@ -702,6 +987,39 @@ class SettingsDialog(QDialog):
 
     def _on_category_changed(self, row: int):
         self.pages.setCurrentIndex(row)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if getattr(self, "_is_recording_key", False):
+            key = event.key()
+            if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+                return
+            if key == Qt.Key.Key_Escape:
+                self._is_recording_key = False
+                self._update_record_btn_ui()
+                event.accept()
+                return
+
+            if key == Qt.Key.Key_Space:
+                key_text = "Space"
+            elif key == Qt.Key.Key_CapsLock:
+                key_text = "Caps Lock"
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                key_text = "Enter"
+            elif key == Qt.Key.Key_Tab:
+                key_text = "Tab"
+            else:
+                seq = QKeySequence(key).toString()
+                key_text = seq if seq else event.text().upper()
+
+            if key_text:
+                self.ptt_key = key_text
+                self._is_recording_key = False
+                self._update_record_btn_ui()
+                self._on_ptt_key_changed(self.ptt_key)
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
 
     def closeEvent(self, event):
         if self._testing_mic:

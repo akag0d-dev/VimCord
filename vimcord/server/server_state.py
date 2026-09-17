@@ -10,12 +10,15 @@ from vimcord.server.db import Database
 
 
 class User:
-    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = ""):
+    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = "", display_name: str = "", banner_color: str = "#5865F2", banner_image: str = ""):
         self.user_id = user_id
         self.username = username
+        self.display_name = display_name or username
         self.avatar_color = avatar_color
         self.avatar_image = avatar_image
         self.bio = bio
+        self.banner_color = banner_color or "#5865F2"
+        self.banner_image = banner_image or ""
         self.status_text = status_text
         self.tcp_writer = tcp_writer
         self.udp_addr: Optional[Tuple[str, int]] = None
@@ -30,9 +33,12 @@ class User:
         return {
             "user_id": self.user_id,
             "username": self.username,
+            "display_name": self.display_name,
             "avatar_color": self.avatar_color,
             "avatar_image": self.avatar_image,
             "bio": self.bio,
+            "banner_color": self.banner_color,
+            "banner_image": self.banner_image,
             "status_text": self.status_text,
             "current_room_id": self.current_room_id,
             "current_voice_channel_id": self.current_voice_channel_id,
@@ -108,7 +114,7 @@ class ServerState:
                 r.channels[ch.channel_id] = ch
             self.rooms[r.room_id] = r
 
-    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = "") -> User:
+    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = "", display_name: str = "", banner_color: str = "#5865F2", banner_image: str = "") -> User:
         user = User(
             user_id=user_id,
             username=username,
@@ -116,7 +122,10 @@ class ServerState:
             avatar_color=avatar_color,
             status_text=status_text,
             avatar_image=avatar_image,
-            bio=bio
+            bio=bio,
+            display_name=display_name,
+            banner_color=banner_color,
+            banner_image=banner_image
         )
         self.users[user_id] = user
         return user

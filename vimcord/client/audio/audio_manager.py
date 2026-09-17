@@ -227,6 +227,52 @@ class AudioManager:
                 pass
             self._out_stream = None
 
+        self.stop_desktop_audio_capture()
+
+    def start_desktop_audio_capture(self):
+        """Captures system/desktop audio during screen sharing to transmit screen sound."""
+        if getattr(self, "_desktop_stream", None) is not None:
+            return
+        try:
+            stereo_dev = None
+            devs = sd.query_devices()
+            for idx, d in enumerate(devs):
+                if d.get("max_input_channels", 0) > 0:
+                    name_lower = d.get("name", "").lower()
+                    if any(k in name_lower for k in ("стерео микшер", "stereo mix", "what u hear", "loopback", "wave out")):
+                        stereo_dev = idx
+                        break
+            if stereo_dev is not None:
+                self._desktop_buffer = collections.deque(maxlen=10)
+                def _desktop_cb(indata, frames, time_info, status):
+                    raw = indata.tobytes()
+                    if hasattr(self, "_desktop_buffer"):
+                        self._desktop_buffer.append(raw)
+
+                self._desktop_stream = sd.InputStream(
+                    samplerate=SAMPLE_RATE,
+                    channels=CHANNELS,
+                    dtype="int16",
+                    blocksize=SAMPLES_PER_FRAME,
+                    device=stereo_dev,
+                    callback=_desktop_cb
+                )
+                self._desktop_stream.start()
+                logger.info(f"Started desktop audio capture on device {stereo_dev}")
+        except Exception as e:
+            logger.debug(f"Desktop audio capture not available: {e}")
+
+    def stop_desktop_audio_capture(self):
+        if getattr(self, "_desktop_stream", None) is not None:
+            try:
+                self._desktop_stream.stop()
+                self._desktop_stream.close()
+            except Exception:
+                pass
+            self._desktop_stream = None
+            if hasattr(self, "_desktop_buffer"):
+                self._desktop_buffer.clear()
+
     def restart(self):
         self.stop()
         self.start()
@@ -406,6 +452,14 @@ class AudioManager:
             raw_bytes = filtered_arr.tobytes()
         elif not is_speaking:
             raw_bytes = b"\x00" * len(raw_bytes)
+
+        # Mix desktop audio (screen share sound) if available
+        if hasattr(self, "_desktop_buffer") and self._desktop_buffer:
+            try:
+                dt_chunk = self._desktop_buffer.popleft()
+                raw_bytes = mix_audio_streams([raw_bytes, dt_chunk])
+            except Exception:
+                pass
 
         if self.loopback_test and not self.is_muted:
             self.add_peer_audio("__loopback__", raw_bytes)
