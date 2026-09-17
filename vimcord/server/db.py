@@ -43,9 +43,14 @@ class Database:
                     salt TEXT NOT NULL,
                     status_text TEXT DEFAULT 'В сети',
                     avatar_color TEXT DEFAULT '#5865F2',
+                    avatar_image TEXT DEFAULT '',
                     created_at REAL NOT NULL
                 )
             """)
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN avatar_image TEXT DEFAULT ''")
+            except Exception:
+                pass
 
             # 2. Rooms (Servers) table
             cur.execute("""
@@ -186,7 +191,8 @@ class Database:
             "user_id": user_id,
             "username": username,
             "status_text": "В сети",
-            "avatar_color": avatar_color
+            "avatar_color": avatar_color,
+            "avatar_image": ""
         }
 
     def authenticate_user(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
@@ -205,12 +211,13 @@ class Database:
                 return True, "Успешный вход", {
                     "user_id": user_dict["user_id"],
                     "username": user_dict["username"],
-                    "status_text": user_dict["status_text"],
-                    "avatar_color": user_dict["avatar_color"]
+                    "status_text": user_dict.get("status_text", "В сети"),
+                    "avatar_color": user_dict.get("avatar_color", "#5865F2"),
+                    "avatar_image": user_dict.get("avatar_image", "")
                 }
             return False, "Неверный пароль", None
 
-    def update_profile(self, user_id: str, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None) -> Tuple[bool, str]:
+    def update_profile(self, user_id: str, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None) -> Tuple[bool, str]:
         with self._get_conn() as conn:
             cur = conn.cursor()
             updates = []
@@ -224,6 +231,9 @@ class Database:
             if avatar_color:
                 updates.append("avatar_color = ?")
                 params.append(avatar_color)
+            if avatar_image is not None:
+                updates.append("avatar_image = ?")
+                params.append(avatar_image)
 
             if not updates:
                 return True, "Нет изменений"
@@ -258,14 +268,14 @@ class Database:
     def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color FROM users WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image FROM users WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
             return dict(row) if row else None
 
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color FROM users WHERE username = ?", (username,))
+            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image FROM users WHERE username = ?", (username,))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -370,7 +380,7 @@ class Database:
             cur.execute(
                 """
                 SELECT f.user_id, f.friend_id, f.status,
-                       u.user_id as peer_id, u.username, u.status_text, u.avatar_color
+                       u.user_id as peer_id, u.username, u.status_text, u.avatar_color, u.avatar_image
                 FROM friendships f
                 JOIN users u ON (u.user_id = CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END)
                 WHERE f.user_id = ? OR f.friend_id = ?
@@ -386,6 +396,7 @@ class Database:
                     "username": row["username"],
                     "status_text": row["status_text"],
                     "avatar_color": row["avatar_color"],
+                    "avatar_image": row["avatar_image"] or "",
                     "friendship_status": row["status"],
                     "is_incoming": is_incoming,
                     "is_outgoing": is_outgoing

@@ -12,55 +12,86 @@ from PyQt6.QtWidgets import (
 )
 
 
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+
+
 class VoiceUserWidget(QWidget):
-    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", parent=None):
+    clicked = pyqtSignal(dict)
+
+    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, parent=None):
         super().__init__(parent)
         self.username = username
         self.user_id = user_id
         self.avatar_color = avatar_color
+        self.avatar_image = avatar_image
+        self.is_muted = is_muted
+        self.is_deafened = is_deafened
         self.is_speaking = False
 
-        self.setFixedSize(110, 110)
+        self.setFixedSize(110, 120)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Нажмите для просмотра профиля")
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Avatar circle
-        initials = self.username[:2].upper() if self.username else "U"
-        self.avatar = QLabel(initials)
-        self.avatar.setFixedSize(54, 54)
+        self.avatar = QLabel()
+        self.avatar.setFixedSize(58, 58)
         self.avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._set_avatar_style(speaking=False)
         layout.addWidget(self.avatar)
 
-        # Username
+        # Username + media icon row
+        name_row = QHBoxLayout()
+        name_row.setSpacing(3)
+        name_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         self.name_label = QLabel(self.username)
         self.name_label.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px;")
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.name_label)
+        name_row.addWidget(self.name_label)
+
+        self.badge_label = QLabel()
+        self.badge_label.setStyleSheet("font-size: 11px;")
+        self._update_badge()
+        name_row.addWidget(self.badge_label)
+
+        layout.addLayout(name_row)
+
+    def _update_badge(self):
+        if self.is_deafened:
+            self.badge_label.setText("🎧")
+            self.badge_label.show()
+        elif self.is_muted:
+            self.badge_label.setText("🔇")
+            self.badge_label.show()
+        else:
+            self.badge_label.setText("")
+            self.badge_label.hide()
 
     def _set_avatar_style(self, speaking: bool):
+        pixmap = get_round_avatar_pixmap(54, self.username, self.avatar_color, self.avatar_image)
+        self.avatar.setPixmap(pixmap)
         if speaking:
-            self.avatar.setStyleSheet(f"""
-                background-color: {self.avatar_color};
-                color: #ffffff;
-                font-size: 18px;
-                font-weight: bold;
-                border-radius: 27px;
-                border: 3px solid #23a55a;
+            self.avatar.setStyleSheet("""
+                QLabel {
+                    border: 3px solid #23a55a;
+                    border-radius: 29px;
+                    background-color: transparent;
+                }
             """)
         else:
-            self.avatar.setStyleSheet(f"""
-                background-color: {self.avatar_color};
-                color: #ffffff;
-                font-size: 18px;
-                font-weight: bold;
-                border-radius: 27px;
-                border: 3px solid transparent;
+            self.avatar.setStyleSheet("""
+                QLabel {
+                    border: 3px solid transparent;
+                    border-radius: 29px;
+                    background-color: transparent;
+                }
             """)
 
     def set_speaking(self, speaking: bool):
@@ -68,10 +99,27 @@ class VoiceUserWidget(QWidget):
             self.is_speaking = speaking
             self._set_avatar_style(speaking)
 
+    def set_media_state(self, is_muted: bool, is_deafened: bool):
+        self.is_muted = is_muted
+        self.is_deafened = is_deafened
+        self._update_badge()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit({
+            "user_id": self.user_id,
+            "username": self.username,
+            "avatar_color": self.avatar_color,
+            "avatar_image": self.avatar_image,
+            "is_muted": self.is_muted,
+            "is_deafened": self.is_deafened
+        })
+        super().mousePressEvent(event)
+
 
 class VoiceView(QWidget):
     disconnect_clicked = pyqtSignal()
     screen_share_toggled = pyqtSignal(bool)  # is_sharing
+    user_profile_requested = pyqtSignal(dict) # user_dict
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -170,7 +218,7 @@ class VoiceView(QWidget):
         self.channel_name = channel_name
         self.title_label.setText(f"Подключено: {channel_name}")
 
-    def update_participants(self, users: List[Dict[str, str]]):
+    def update_participants(self, users: List[Dict[str, Any]]):
         for w in self.user_widgets.values():
             self.grid_layout.removeWidget(w)
             w.deleteLater()
@@ -181,11 +229,26 @@ class VoiceView(QWidget):
             uid = u.get("user_id")
             uname = u.get("username", "User")
             color = u.get("avatar_color", "#5865F2")
-            w = VoiceUserWidget(username=uname, user_id=uid, avatar_color=color)
+            avatar_img = u.get("avatar_image", "")
+            is_muted = u.get("is_muted", False)
+            is_deaf = u.get("is_deafened", False)
+            w = VoiceUserWidget(
+                username=uname,
+                user_id=uid,
+                avatar_color=color,
+                avatar_image=avatar_img,
+                is_muted=is_muted,
+                is_deafened=is_deaf
+            )
+            w.clicked.connect(self.user_profile_requested.emit)
             row = idx // cols
             col = idx % cols
             self.grid_layout.addWidget(w, row, col)
             self.user_widgets[uid] = w
+
+    def set_user_media_state(self, user_id: str, is_muted: bool, is_deafened: bool):
+        if user_id in self.user_widgets:
+            self.user_widgets[user_id].set_media_state(is_muted, is_deafened)
 
     def set_user_speaking(self, user_id: str, is_speaking: bool):
         if user_id in self.user_widgets:

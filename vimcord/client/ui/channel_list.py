@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QMessageBox
 )
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
 
 class ChannelListWidget(QWidget):
@@ -19,6 +20,7 @@ class ChannelListWidget(QWidget):
     dm_user_selected = pyqtSignal(str, str)             # user_id, username
     call_user_requested = pyqtSignal(str)               # user_id
     friends_tab_selected = pyqtSignal()                 # Open friends view
+    user_profile_requested = pyqtSignal(dict)           # user_dict
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +30,7 @@ class ChannelListWidget(QWidget):
         self.current_mode = "@me"  # "@me" or room_id
         self.current_room_data: Optional[Dict[str, Any]] = None
         self.current_users_list: List[Dict[str, Any]] = []
+        self.friends_list: List[Dict[str, Any]] = []
         self.my_user_id: str = ""
         
         self.active_text_ch_id: Optional[str] = None
@@ -132,6 +135,11 @@ class ChannelListWidget(QWidget):
         self.del_room_btn.setVisible(room.get("room_id") != "room-default")
         self._render_room_channels()
 
+    def set_friends(self, friends: List[Dict[str, Any]]):
+        self.friends_list = friends
+        if self.current_mode == "@me":
+            self._render_dm_list()
+
     def update_users(self, users: List[Dict[str, Any]]):
         self.current_users_list = users
         if self.current_mode == "@me":
@@ -165,19 +173,43 @@ class ChannelListWidget(QWidget):
         sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 14px 8px 4px 8px;")
         self.content_layout.addWidget(sec_label)
 
-        other_users = [u for u in self.current_users_list if u.get("user_id") != self.my_user_id]
-        if not other_users:
-            empty_lbl = QLabel("Нет других пользователей")
-            empty_lbl.setStyleSheet("color: #80848e; font-size: 12px; padding: 8px;")
+        # Privacy filter: ONLY show confirmed friends in DMs
+        confirmed_friends = [f for f in self.friends_list if f.get("friendship_status") == "accepted"]
+        if not confirmed_friends:
+            empty_lbl = QLabel("Нет друзей в списке\nПерейдите во вкладку 'Друзья', чтобы отправить заявку 👥")
+            empty_lbl.setWordWrap(True)
+            empty_lbl.setStyleSheet("color: #80848e; font-size: 12px; padding: 10px 8px; line-height: 1.4;")
             self.content_layout.addWidget(empty_lbl)
             return
 
-        for u in other_users:
-            uid = u.get("user_id")
-            uname = u.get("username", "User")
-            color = u.get("avatar_color", "#5865F2")
-            in_call = u.get("in_call", False)
-            is_online = u.get("online", True)
+        for f in confirmed_friends:
+            uid = f.get("peer_id")
+            uname = f.get("username", "User")
+            color = f.get("avatar_color", "#5865F2")
+            avatar_img = f.get("avatar_image", "")
+
+            # Match online status
+            is_online = False
+            in_call = False
+            matched_user_dict = None
+            for u in self.current_users_list:
+                if u.get("user_id") == uid:
+                    is_online = u.get("online", True)
+                    in_call = u.get("in_call", False)
+                    color = u.get("avatar_color", color)
+                    avatar_img = u.get("avatar_image", avatar_img)
+                    matched_user_dict = u
+                    break
+
+            if not matched_user_dict:
+                matched_user_dict = {
+                    "user_id": uid,
+                    "username": uname,
+                    "avatar_color": color,
+                    "avatar_image": avatar_img,
+                    "status_text": f.get("status_text", ""),
+                    "online": is_online
+                }
 
             item_w = QWidget()
             is_selected = (uid == self.active_dm_user_id)
@@ -190,23 +222,33 @@ class ChannelListWidget(QWidget):
             i_layout.setContentsMargins(6, 4, 6, 4)
             i_layout.setSpacing(8)
 
-            # Avatar dot
-            dot_color = "#f23f43" if in_call else ("#23a55a" if is_online else "#80848e")
-            dot = QLabel("●")
-            dot.setStyleSheet(f"color: {dot_color}; font-size: 13px;")
-            i_layout.addWidget(dot)
+            # Circular avatar pixmap
+            av_lbl = QLabel()
+            av_lbl.setFixedSize(26, 26)
+            av_lbl.setPixmap(get_round_avatar_pixmap(26, uname, color, avatar_img))
+            av_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            av_lbl.setToolTip("Посмотреть профиль")
+            av_lbl.mousePressEvent = lambda e, ud=matched_user_dict: self.user_profile_requested.emit(ud)
+            i_layout.addWidget(av_lbl)
 
+            # Name button
             name_btn = QPushButton(uname)
             name_btn.setStyleSheet("text-align: left; color: #dbdee1; font-weight: 500; border: none; background: transparent; font-size: 13px;")
             name_btn.clicked.connect(lambda checked, i_uid=uid, i_name=uname: self._on_user_chat_clicked(i_uid, i_name))
             i_layout.addWidget(name_btn, 1)
 
+            # Online dot
+            dot_color = "#f23f43" if in_call else ("#23a55a" if is_online else "#80848e")
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {dot_color}; font-size: 11px;")
+            i_layout.addWidget(dot)
+
             # Quick Call button
             call_btn = QPushButton("📞")
             call_btn.setToolTip("Позвонить лично")
-            call_btn.setFixedSize(26, 26)
+            call_btn.setFixedSize(24, 24)
             call_btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; border-radius: 13px; font-size: 12px; }
+                QPushButton { background: transparent; border: none; border-radius: 12px; font-size: 11px; }
                 QPushButton:hover { background-color: #23a55a; color: white; }
             """)
             call_btn.clicked.connect(lambda checked, i_uid=uid: self.call_user_requested.emit(i_uid))
@@ -252,14 +294,16 @@ class ChannelListWidget(QWidget):
 
         for vc in voice_channels:
             cid = vc.get("channel_id")
-            cname = vc.get("name")
+            raw_cname = vc.get("name", "Голосовой")
+            # Clean leading speaker icon if already present to prevent double 🔊 🔊
+            clean_name = raw_cname.lstrip("🔊 ").strip()
             voice_users = vc.get("voice_users", [])
             is_connected = (cid == self.active_voice_ch_id)
 
             bg = "#35373c" if is_connected else "transparent"
             color = "#23a55a" if is_connected else "#949ba4"
 
-            v_btn = QPushButton(f"🔊  {cname}")
+            v_btn = QPushButton(f"🔊  {clean_name}")
             v_btn.setStyleSheet(f"""
                 QPushButton {{
                     text-align: left; background-color: {bg}; color: {color};
@@ -267,25 +311,48 @@ class ChannelListWidget(QWidget):
                 }}
                 QPushButton:hover {{ background-color: #35373c; color: #dbdee1; }}
             """)
-            v_btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=cname: self._on_voice_ch_clicked(r_id, ch_id, ch_nm))
+            v_btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=clean_name: self._on_voice_ch_clicked(r_id, ch_id, ch_nm))
             self.content_layout.addWidget(v_btn)
 
             if voice_users:
                 u_container = QWidget()
                 u_layout = QVBoxLayout(u_container)
-                u_layout.setContentsMargins(24, 0, 8, 4)
-                u_layout.setSpacing(3)
+                u_layout.setContentsMargins(20, 0, 8, 4)
+                u_layout.setSpacing(2)
 
                 for uid in voice_users:
                     uname = uid
+                    u_dict = None
+                    is_muted = False
+                    is_deaf = False
                     for u in self.current_users_list:
                         if u.get("user_id") == uid:
-                            uname = u.get("username")
+                            uname = u.get("username", uid)
+                            is_muted = u.get("is_muted", False)
+                            is_deaf = u.get("is_deafened", False)
+                            u_dict = u
                             break
-                    
-                    vu_lbl = QLabel(f"🎙️ {uname}")
-                    vu_lbl.setStyleSheet("color: #dbdee1; font-size: 12px;")
-                    u_layout.addWidget(vu_lbl)
+
+                    media_badge = ""
+                    if is_deaf:
+                        media_badge = " 🎧"
+                    elif is_muted:
+                        media_badge = " 🔇"
+
+                    vu_btn = QPushButton(f"🎙️ {uname}{media_badge}")
+                    vu_btn.setToolTip("Нажмите для просмотра профиля")
+                    vu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    vu_btn.setStyleSheet("""
+                        QPushButton {
+                            text-align: left; background: transparent; color: #dbdee1;
+                            font-size: 12px; border: none; padding: 3px 6px; border-radius: 3px;
+                        }
+                        QPushButton:hover { background-color: #35373c; color: #ffffff; }
+                    """)
+                    if not u_dict:
+                        u_dict = {"user_id": uid, "username": uname}
+                    vu_btn.clicked.connect(lambda checked, ud=u_dict: self.user_profile_requested.emit(ud))
+                    u_layout.addWidget(vu_btn)
 
                 self.content_layout.addWidget(u_container)
 

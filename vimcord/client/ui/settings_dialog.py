@@ -7,14 +7,16 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSlider, QProgressBar, QStackedWidget,
-    QListWidget, QListWidgetItem, QFrame, QMessageBox
+    QListWidget, QListWidgetItem, QFrame, QMessageBox, QFileDialog
 )
+import base64
 from vimcord.client.audio.audio_manager import AudioManager
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
 
 class SettingsDialog(QDialog):
-    profile_updated = pyqtSignal(str, str, str)  # username, status_text, avatar_color
-    password_changed = pyqtSignal(str, str)      # old_pass, new_pass
+    profile_updated = pyqtSignal(str, str, str, str)  # username, status_text, avatar_color, avatar_image
+    password_changed = pyqtSignal(str, str)           # old_pass, new_pass
     logout_requested = pyqtSignal()
 
     DISCORD_COLORS = [
@@ -36,6 +38,7 @@ class SettingsDialog(QDialog):
         self.user_id = user_data.get("user_id", "")
         self.status_text = user_data.get("status_text", "В сети")
         self.avatar_color = user_data.get("avatar_color", "#5865F2")
+        self.avatar_image = user_data.get("avatar_image", "")
         self.selected_color = self.avatar_color
 
         self.setWindowTitle("Настройки — VimCord")
@@ -135,14 +138,10 @@ class SettingsDialog(QDialog):
         c_layout = QHBoxLayout(card)
         c_layout.setSpacing(16)
 
-        initials = self.username[:2].upper() if self.username else "U"
-        self.avatar_preview = QLabel(initials)
+        self.avatar_preview = QLabel()
         self.avatar_preview.setFixedSize(54, 54)
         self.avatar_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.avatar_preview.setStyleSheet(f"""
-            background-color: {self.avatar_color}; color: white;
-            font-size: 20px; font-weight: bold; border-radius: 27px;
-        """)
+        self._refresh_avatar_preview()
         c_layout.addWidget(self.avatar_preview)
 
         info_l = QVBoxLayout()
@@ -162,6 +161,34 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(card)
 
+        # Avatar Upload / Remove Row
+        av_btns_row = QHBoxLayout()
+        av_btns_row.setSpacing(10)
+
+        upload_av_btn = QPushButton("📁 Загрузить аватарку (PNG/JPG)")
+        upload_av_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4e5058; color: white; font-weight: bold;
+                padding: 6px 12px; border-radius: 4px; border: none; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #6d6f78; }
+        """)
+        upload_av_btn.clicked.connect(self._on_upload_avatar)
+        av_btns_row.addWidget(upload_av_btn)
+
+        remove_av_btn = QPushButton("✕ Сбросить на цвет")
+        remove_av_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #f23f43; border: 1px solid #f23f43;
+                padding: 6px 12px; border-radius: 4px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #f23f43; color: white; }
+        """)
+        remove_av_btn.clicked.connect(self._on_remove_avatar)
+        av_btns_row.addWidget(remove_av_btn)
+        av_btns_row.addStretch(1)
+        layout.addLayout(av_btns_row)
+
         # Profile Edits Form
         layout.addWidget(QLabel("ОТОБРАЖАЕМОЕ ИМЯ:"))
         self.uname_edit = QLineEdit(self.username)
@@ -173,7 +200,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.status_edit)
 
         # Avatar color palette
-        layout.addWidget(QLabel("ЦВЕТ АВАТАРА:"))
+        layout.addWidget(QLabel("ЦВЕТ АВАТАРА (ДЛЯ СТАНДАРТНОЙ ИКОНКИ):"))
         color_row = QHBoxLayout()
         color_row.setSpacing(8)
         self.color_buttons = []
@@ -231,12 +258,40 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
         return w
 
+    def _refresh_avatar_preview(self):
+        pixmap = get_round_avatar_pixmap(
+            54, self.username, self.selected_color, self.avatar_image
+        )
+        self.avatar_preview.setPixmap(pixmap)
+
+    def _on_upload_avatar(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите изображение профиля", "",
+            "Изображения (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, "rb") as f:
+                raw = f.read()
+            # If greater than 500KB, warn or downscale
+            if len(raw) > 1024 * 1024:
+                QMessageBox.warning(self, "Большой файл", "Пожалуйста, выберите изображение размером до 1 МБ.")
+                return
+            b64 = base64.b64encode(raw).decode("utf-8")
+            self.avatar_image = b64
+            self._refresh_avatar_preview()
+            QMessageBox.information(self, "Аватарка выбрана", "Аватарка загружена! Нажмите 'Сохранить изменения профиля' для применения.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось прочитать файл: {e}")
+
+    def _on_remove_avatar(self):
+        self.avatar_image = ""
+        self._refresh_avatar_preview()
+
     def _select_avatar_color(self, hex_code: str):
         self.selected_color = hex_code
-        self.avatar_preview.setStyleSheet(f"""
-            background-color: {hex_code}; color: white;
-            font-size: 20px; font-weight: bold; border-radius: 27px;
-        """)
+        self._refresh_avatar_preview()
         for btn, h in self.color_buttons:
             border = "2px solid #ffffff" if h == hex_code else "none"
             btn.setStyleSheet(f"background-color: {h}; border-radius: 14px; border: {border};")
@@ -255,7 +310,7 @@ class SettingsDialog(QDialog):
         self.card_name_lbl.setText(new_name)
         self.card_status_lbl.setText(new_status or "В сети")
 
-        self.profile_updated.emit(new_name, new_status, self.selected_color)
+        self.profile_updated.emit(new_name, new_status, self.selected_color, self.avatar_image)
         QMessageBox.information(self, "Успешно", "Запрос на обновление профиля отправлен на сервер!")
 
     def _on_change_password(self):
@@ -321,11 +376,11 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.out_slider)
 
         # VAD
-        self.vad_lbl = QLabel(f"Порог активации по голосу: {int(self.audio_manager.vad_threshold * 1000)}")
+        self.vad_lbl = QLabel(f"Порог активации по голосу: {self.audio_manager.vad_threshold:.3f}")
         layout.addWidget(self.vad_lbl)
         self.vad_slider = QSlider(Qt.Orientation.Horizontal)
-        self.vad_slider.setRange(5, 100)
-        self.vad_slider.setValue(int(self.audio_manager.vad_threshold * 1000))
+        self.vad_slider.setRange(2, 50)
+        self.vad_slider.setValue(max(2, min(50, int(self.audio_manager.vad_threshold * 1000))))
         self.vad_slider.valueChanged.connect(self._on_vad_thresh)
         layout.addWidget(self.vad_slider)
 
@@ -375,8 +430,9 @@ class SettingsDialog(QDialog):
         self.audio_manager.output_volume = val / 100.0
 
     def _on_vad_thresh(self, val):
-        self.vad_lbl.setText(f"Порог активации по голосу: {val}")
-        self.audio_manager.vad_threshold = val / 1000.0
+        thresh = val / 1000.0
+        self.vad_lbl.setText(f"Порог активации по голосу: {thresh:.3f}")
+        self.audio_manager.vad_threshold = thresh
 
     def _toggle_mic_test(self):
         self._testing_mic = not self._testing_mic

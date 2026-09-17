@@ -12,11 +12,28 @@ from vimcord.server.server_state import ServerState
 from vimcord.server.tcp_server import TCPServer
 from vimcord.server.udp_server import start_udp_server
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] (%(name)s) %(message)s",
-    datefmt="%H:%M:%S"
+import logging.handlers
+
+log_formatter = logging.Formatter(
+    "[%(asctime)s] [%(levelname)s] (%(name)s) %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+
+file_handler = logging.handlers.RotatingFileHandler(
+    "vimcord_server.log",
+    maxBytes=5 * 1024 * 1024,
+    backupCount=3,
+    encoding="utf-8"
+)
+file_handler.setFormatter(log_formatter)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
 logger = logging.getLogger("VimCord.Main")
 
 

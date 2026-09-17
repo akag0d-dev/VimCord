@@ -10,16 +10,19 @@ from vimcord.server.db import Database
 
 
 class User:
-    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети"):
+    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = ""):
         self.user_id = user_id
         self.username = username
         self.avatar_color = avatar_color
+        self.avatar_image = avatar_image
         self.status_text = status_text
         self.tcp_writer = tcp_writer
         self.udp_addr: Optional[Tuple[str, int]] = None
         self.current_room_id: Optional[str] = None
         self.current_voice_channel_id: Optional[str] = None
         self.active_call_id: Optional[str] = None
+        self.is_muted: bool = False
+        self.is_deafened: bool = False
         self.last_seen: float = time.time()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -27,10 +30,13 @@ class User:
             "user_id": self.user_id,
             "username": self.username,
             "avatar_color": self.avatar_color,
+            "avatar_image": self.avatar_image,
             "status_text": self.status_text,
             "current_room_id": self.current_room_id,
             "current_voice_channel_id": self.current_voice_channel_id,
             "in_call": bool(self.active_call_id),
+            "is_muted": self.is_muted,
+            "is_deafened": self.is_deafened,
             "online": True
         }
 
@@ -100,13 +106,14 @@ class ServerState:
                 r.channels[ch.channel_id] = ch
             self.rooms[r.room_id] = r
 
-    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети") -> User:
+    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "") -> User:
         user = User(
             user_id=user_id,
             username=username,
             tcp_writer=tcp_writer,
             avatar_color=avatar_color,
-            status_text=status_text
+            status_text=status_text,
+            avatar_image=avatar_image
         )
         self.users[user_id] = user
         return user
@@ -196,22 +203,22 @@ class ServerState:
         self.db.delete_channel(channel_id)
         return True
 
-    def join_voice(self, user_id: str, room_id: str, channel_id: str) -> bool:
+    def join_voice(self, user_id: str, room_id: str, channel_id: str) -> Tuple[bool, Optional[Tuple[str, str]]]:
         user = self.users.get(user_id)
         room = self.rooms.get(room_id)
         if not user or not room or channel_id not in room.channels:
-            return False
+            return False, None
         
         channel = room.channels[channel_id]
         if channel.channel_type != "voice":
-            return False
+            return False, None
             
-        self.leave_voice(user_id)
+        prev_voice = self.leave_voice(user_id)
         
         channel.voice_users.add(user_id)
         user.current_room_id = room_id
         user.current_voice_channel_id = channel_id
-        return True
+        return True, prev_voice
 
     def leave_voice(self, user_id: str) -> Optional[Tuple[str, str]]:
         user = self.users.get(user_id)

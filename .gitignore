@@ -44,3 +44,7 @@ secrets.json
 # Logs
 *.log
 logs/
+
+# SQLite Databases
+*.db
+*.sqlite3

@@ -114,7 +114,8 @@ class TCPServer:
                         username=u_data["username"],
                         tcp_writer=writer,
                         avatar_color=u_data.get("avatar_color", "#5865F2"),
-                        status_text=u_data.get("status_text", "В сети")
+                        status_text=u_data.get("status_text", "В сети"),
+                        avatar_image=u_data.get("avatar_image", "")
                     )
 
                     # Return full initial state
@@ -125,6 +126,7 @@ class TCPServer:
                         "user_id": current_user.user_id,
                         "username": current_user.username,
                         "avatar_color": current_user.avatar_color,
+                        "avatar_image": current_user.avatar_image,
                         "status_text": current_user.status_text,
                         "rooms": self.server_state.get_all_rooms_dict(),
                         "users": self.server_state.get_all_users_dict(),
@@ -311,7 +313,14 @@ class TCPServer:
                     new_uname = msg.get("username")
                     new_status = msg.get("status_text")
                     new_color = msg.get("avatar_color")
-                    ok, res_msg = self.db.update_profile(current_user.user_id, new_uname, new_status, new_color)
+                    new_avatar = msg.get("avatar_image")
+                    ok, res_msg = self.db.update_profile(
+                        current_user.user_id,
+                        username=new_uname,
+                        status_text=new_status,
+                        avatar_color=new_color,
+                        avatar_image=new_avatar
+                    )
                     if ok:
                         if new_uname:
                             current_user.username = new_uname
@@ -319,6 +328,8 @@ class TCPServer:
                             current_user.status_text = new_status
                         if new_color:
                             current_user.avatar_color = new_color
+                        if new_avatar is not None:
+                            current_user.avatar_image = new_avatar
 
                         await self.broadcast({
                             "type": "user_presence",
@@ -332,6 +343,35 @@ class TCPServer:
                         "user": current_user.to_dict()
                     }))
                     await writer.drain()
+
+                elif msg_type == "get_profile":
+                    target_uid = msg.get("user_id")
+                    target_info = self.db.get_user_by_id(target_uid) if target_uid else None
+                    if target_info:
+                        online_user = self.server_state.users.get(target_uid)
+                        target_info["online"] = bool(online_user)
+                        writer.write(encode_json_message({
+                            "type": "profile_resp",
+                            "success": True,
+                            "profile": target_info
+                        }))
+                    else:
+                        writer.write(encode_json_message({
+                            "type": "profile_resp",
+                            "success": False,
+                            "error": "Пользователь не найден"
+                        }))
+                    await writer.drain()
+
+                elif msg_type == "user_media_state":
+                    current_user.is_muted = bool(msg.get("is_muted", False))
+                    current_user.is_deafened = bool(msg.get("is_deafened", False))
+                    await self.broadcast({
+                        "type": "user_media_state",
+                        "user_id": current_user.user_id,
+                        "is_muted": current_user.is_muted,
+                        "is_deafened": current_user.is_deafened
+                    })
 
                 elif msg_type == "change_password":
                     old_p = msg.get("old_password", "")
@@ -348,13 +388,25 @@ class TCPServer:
                 elif msg_type == "join_voice":
                     room_id = msg.get("room_id")
                     channel_id = msg.get("channel_id")
-                    if self.server_state.join_voice(current_user.user_id, room_id, channel_id):
+                    ok, prev = self.server_state.join_voice(current_user.user_id, room_id, channel_id)
+                    if ok:
+                        if prev:
+                            prev_room_id, prev_channel_id = prev
+                            await self.broadcast({
+                                "type": "voice_state_update",
+                                "user_id": current_user.user_id,
+                                "room_id": prev_room_id,
+                                "channel_id": prev_channel_id,
+                                "action": "leave"
+                            })
                         await self.broadcast({
                             "type": "voice_state_update",
                             "user_id": current_user.user_id,
                             "room_id": room_id,
                             "channel_id": channel_id,
-                            "action": "join"
+                            "action": "join",
+                            "is_muted": current_user.is_muted,
+                            "is_deafened": current_user.is_deafened
                         })
 
                 elif msg_type == "leave_voice":
@@ -436,7 +488,17 @@ class TCPServer:
         finally:
             if current_user:
                 logger.info(f"User disconnected: {current_user.username} ({current_user.user_id})")
+                prev_room_id = current_user.current_room_id
+                prev_channel_id = current_user.current_voice_channel_id
                 self.server_state.remove_user(current_user.user_id)
+                if prev_room_id and prev_channel_id:
+                    await self.broadcast({
+                        "type": "voice_state_update",
+                        "user_id": current_user.user_id,
+                        "room_id": prev_room_id,
+                        "channel_id": prev_channel_id,
+                        "action": "leave"
+                    })
                 await self.broadcast({
                     "type": "user_presence",
                     "user": {

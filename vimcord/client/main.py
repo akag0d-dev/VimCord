@@ -115,6 +115,7 @@ def main():
     user_id = login_data.get("user_id", "")
     logged_in_name = login_data.get("username", username)
     avatar_color = login_data.get("avatar_color", "#5865F2")
+    avatar_image = login_data.get("avatar_image", "")
     status_text = login_data.get("status_text", "В сети")
     rooms = login_data.get("rooms", [])
     users = login_data.get("users", [])
@@ -131,7 +132,8 @@ def main():
         users=users,
         friends=friends,
         host=server_host,
-        udp_port=udp_port
+        udp_port=udp_port,
+        avatar_image=avatar_image
     )
     main_win.show()
 

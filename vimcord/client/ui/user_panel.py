@@ -6,12 +6,14 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 )
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
 
 class UserPanel(QWidget):
     mic_toggled = pyqtSignal(bool)       # is_muted
     deafen_toggled = pyqtSignal(bool)    # is_deafened
     settings_clicked = pyqtSignal()
+    profile_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,6 +24,9 @@ class UserPanel(QWidget):
         self.is_deafened = False
         self.username = "User"
         self.user_id = ""
+        self.avatar_color = "#5865F2"
+        self.avatar_image = ""
+        self.status_text = "В сети"
 
         self._init_ui()
 
@@ -30,32 +35,41 @@ class UserPanel(QWidget):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
+        # Avatar and user info clickable container
+        profile_btn = QWidget()
+        profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        profile_btn.setStyleSheet("""
+            QWidget:hover {
+                background-color: #35373c;
+                border-radius: 4px;
+            }
+        """)
+        p_layout = QHBoxLayout(profile_btn)
+        p_layout.setContentsMargins(4, 2, 4, 2)
+        p_layout.setSpacing(6)
+
         # Avatar circle
-        self.avatar_label = QLabel("👤")
+        self.avatar_label = QLabel()
         self.avatar_label.setFixedSize(36, 36)
         self.avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.avatar_label.setStyleSheet("""
-            background-color: #5865F2;
-            border-radius: 18px;
-            font-size: 18px;
-            color: #ffffff;
-        """)
-        layout.addWidget(self.avatar_label)
+        p_layout.addWidget(self.avatar_label)
 
         # Username & status
         info_layout = QVBoxLayout()
-        info_layout.setContentsMargins(2, 2, 2, 2)
+        info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(1)
 
         self.name_label = QLabel(self.username)
-        self.name_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 13px;")
+        self.name_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 13px; background: transparent;")
         info_layout.addWidget(self.name_label)
 
         self.status_label = QLabel("В сети")
-        self.status_label.setStyleSheet("color: #23a55a; font-size: 11px;")
+        self.status_label.setStyleSheet("color: #23a55a; font-size: 11px; background: transparent;")
         info_layout.addWidget(self.status_label)
 
-        layout.addLayout(info_layout, 1)
+        p_layout.addLayout(info_layout, 1)
+        profile_btn.mousePressEvent = lambda e: self.profile_clicked.emit()
+        layout.addWidget(profile_btn, 1)
 
         # Action buttons
         btn_style_normal = """
@@ -107,20 +121,17 @@ class UserPanel(QWidget):
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.settings_btn)
 
-    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "В сети"):
+    def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = ""):
         self.username = username
         self.user_id = user_id
+        self.avatar_color = avatar_color
+        self.avatar_image = avatar_image
+        self.status_text = status_text
         self.name_label.setText(username)
         self.status_label.setText(status_text or "В сети")
-        initials = username[:2].upper() if username else "U"
-        self.avatar_label.setText(initials)
-        self.avatar_label.setStyleSheet(f"""
-            background-color: {avatar_color};
-            border-radius: 18px;
-            font-size: 14px;
-            font-weight: bold;
-            color: #ffffff;
-        """)
+        pixmap = get_round_avatar_pixmap(36, username, avatar_color, avatar_image)
+        self.avatar_label.setPixmap(pixmap)
+        self.avatar_label.setStyleSheet("background: transparent; border: none;")
 
     def _toggle_mic(self):
         self.is_muted = not self.is_muted

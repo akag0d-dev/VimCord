@@ -39,7 +39,10 @@ class AudioManager:
         
         self.is_muted: bool = False
         self.is_deafened: bool = False
-        self.vad_threshold: float = 0.02
+        self.vad_threshold: float = 0.005
+        self.hangover_frames_max: int = 15  # 300 ms hold-time to prevent word-ending cutoffs
+        self.hangover_counter: int = 0
+        self.is_speaking: bool = False
         self.output_volume: float = 1.0
         self.mic_volume: float = 1.0
         self.loopback_test: bool = False
@@ -208,7 +211,14 @@ class AudioManager:
             raw_bytes = adjust_volume(raw_bytes, self.mic_volume)
 
         rms = calculate_rms(raw_bytes)
-        is_speaking = False if self.is_muted else (rms >= self.vad_threshold)
+        above_threshold = (rms >= self.vad_threshold)
+        if above_threshold:
+            self.hangover_counter = self.hangover_frames_max
+        elif self.hangover_counter > 0:
+            self.hangover_counter -= 1
+
+        is_speaking = False if self.is_muted else (above_threshold or self.hangover_counter > 0)
+        self.is_speaking = is_speaking
 
         if self.loopback_test and not self.is_muted:
             self.add_peer_audio("__loopback__", raw_bytes)

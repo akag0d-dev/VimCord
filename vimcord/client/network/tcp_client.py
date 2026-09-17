@@ -44,6 +44,8 @@ class TCPClientSignals(QObject):
 
     # Profile & settings
     profile_update_resp = pyqtSignal(bool, str, dict) # success, message, user_dict
+    profile_resp = pyqtSignal(bool, dict)             # success, profile_dict_or_error
+    user_media_state = pyqtSignal(dict)               # user_id, is_muted, is_deafened
     change_password_resp = pyqtSignal(bool, str)      # success, message
 
     # 1-on-1 Call events
@@ -154,7 +156,7 @@ class TCPClient:
     def send_decline_friend_request(self, peer_id: str):
         self.send_message({"type": "decline_friend_request", "peer_id": peer_id})
 
-    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None):
+    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None):
         msg = {"type": "update_profile"}
         if username:
             msg["username"] = username
@@ -162,7 +164,15 @@ class TCPClient:
             msg["status_text"] = status_text
         if avatar_color:
             msg["avatar_color"] = avatar_color
+        if avatar_image is not None:
+            msg["avatar_image"] = avatar_image
         self.send_message(msg)
+
+    def send_get_profile(self, user_id: str):
+        self.send_message({"type": "get_profile", "user_id": user_id})
+
+    def send_user_media_state(self, is_muted: bool, is_deafened: bool):
+        self.send_message({"type": "user_media_state", "is_muted": is_muted, "is_deafened": is_deafened})
 
     def send_change_password(self, old_pass: str, new_pass: str):
         self.send_message({"type": "change_password", "old_password": old_pass, "new_password": new_pass})
@@ -274,6 +284,15 @@ class TCPClient:
                 msg.get("message", ""),
                 msg.get("user", {})
             )
+
+        elif mtype == "profile_resp":
+            self.signals.profile_resp.emit(
+                msg.get("success", False),
+                msg.get("profile", {}) if msg.get("success", False) else {"error": msg.get("error", "")}
+            )
+
+        elif mtype == "user_media_state":
+            self.signals.user_media_state.emit(msg)
 
         elif mtype == "change_password_resp":
             self.signals.change_password_resp.emit(msg.get("success", False), msg.get("message", ""))
