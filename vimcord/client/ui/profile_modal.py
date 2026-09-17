@@ -107,7 +107,8 @@ class UserProfileModal(QDialog):
         about_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #949ba4;")
         content_layout.addWidget(about_title)
 
-        about_text = QLabel("Пользователь VimCord 🚀")
+        bio_content = self.user_data.get("bio", "").strip() or "Пользователь VimCord 🚀"
+        about_text = QLabel(bio_content)
         about_text.setWordWrap(True)
         about_text.setStyleSheet("""
             background-color: #2b2d31;

@@ -16,6 +16,7 @@ class ChannelListWidget(QWidget):
     voice_channel_selected = pyqtSignal(str, str, str)  # room_id, channel_id, name
     create_channel_requested = pyqtSignal(str)          # room_id
     delete_room_requested = pyqtSignal(str)             # room_id
+    leave_room_requested = pyqtSignal(str)              # room_id
     invite_room_requested = pyqtSignal(str)             # room_id
     dm_user_selected = pyqtSignal(str, str)             # user_id, username
     call_user_requested = pyqtSignal(str)               # user_id
@@ -83,7 +84,20 @@ class ChannelListWidget(QWidget):
         self.add_ch_btn.clicked.connect(self._on_add_channel)
         header_layout.addWidget(self.add_ch_btn)
 
-        # Delete Room button (Custom rooms only)
+        # Leave Room button
+        self.leave_room_btn = QPushButton("🚪")
+        self.leave_room_btn.setToolTip("Покинуть сервер")
+        self.leave_room_btn.setFixedSize(26, 26)
+        self.leave_room_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; font-size: 13px; border: none; border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #35373c; }
+        """)
+        self.leave_room_btn.clicked.connect(self._on_leave_room)
+        header_layout.addWidget(self.leave_room_btn)
+
+        # Delete Room button (Owner only)
         self.del_room_btn = QPushButton("🗑️")
         self.del_room_btn.setToolTip("Удалить сервер")
         self.del_room_btn.setFixedSize(26, 26)
@@ -123,6 +137,7 @@ class ChannelListWidget(QWidget):
         self.header_title.setText("Личные сообщения")
         self.invite_btn.hide()
         self.add_ch_btn.hide()
+        self.leave_room_btn.hide()
         self.del_room_btn.hide()
         self._render_dm_list()
 
@@ -132,8 +147,17 @@ class ChannelListWidget(QWidget):
         self.header_title.setText(room.get("name", "Сервер"))
         self.invite_btn.show()
         self.add_ch_btn.show()
-        self.del_room_btn.setVisible(room.get("room_id") != "room-default")
+
+        is_custom_room = (room.get("room_id") != "room-default")
+        is_owner = (room.get("owner_id") == self.my_user_id)
+
+        self.leave_room_btn.setVisible(is_custom_room and not is_owner)
+        self.del_room_btn.setVisible(is_custom_room and is_owner)
         self._render_room_channels()
+
+    def _on_leave_room(self):
+        if self.current_mode and self.current_mode != "@me":
+            self.leave_room_requested.emit(self.current_mode)
 
     def set_friends(self, friends: List[Dict[str, Any]]):
         self.friends_list = friends

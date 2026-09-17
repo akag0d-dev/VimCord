@@ -26,10 +26,31 @@ class ScreenCapturer(QObject):
         self.target_type: str = "channel"
         self._seq: int = 0
 
-        # Capture timer running at ~10 FPS (100 ms interval)
+        self.res_width: int = 800
+        self.res_height: int = 450
+        self.fps: int = 15
+        self.quality: int = 45
+
+        # Capture timer running at configurable FPS
         self.timer = QTimer(self)
-        self.timer.setInterval(100)
+        self.timer.setInterval(int(1000 / self.fps))
         self.timer.timeout.connect(self._capture_frame)
+
+    def set_stream_settings(self, resolution: str = "720p", fps: int = 15, quality: int = 45):
+        """Sets resolution preset ('360p', '480p', '720p', '1080p'), FPS, and JPEG quality."""
+        resolutions = {
+            "360p": (640, 360),
+            "480p": (854, 480),
+            "720p": (1280, 720),
+            "1080p": (1920, 1080)
+        }
+        w, h = resolutions.get(resolution, (800, 450))
+        self.res_width = w
+        self.res_height = h
+        self.fps = max(5, min(30, fps))
+        self.quality = max(20, min(85, quality))
+        self.timer.setInterval(int(1000 / self.fps))
+        logger.info(f"Screen share settings updated: {w}x{h}, {self.fps} FPS, quality {self.quality}")
 
     def start_sharing(self, user_id: str, target_id: str, target_type: str = "channel"):
         self.user_id = user_id
@@ -58,9 +79,8 @@ class ScreenCapturer(QObject):
         if pixmap.isNull():
             return
 
-        # Scale down to 800x450, quality 40 for optimal compression, fast encoding, and low bandwidth (~5-7 KB)
         scaled = pixmap.scaled(
-            800, 450,
+            self.res_width, self.res_height,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.FastTransformation
         )
@@ -68,7 +88,7 @@ class ScreenCapturer(QObject):
         byte_arr = QByteArray()
         buffer = QBuffer(byte_arr)
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-        scaled.save(buffer, "JPEG", 40)
+        scaled.save(buffer, "JPEG", self.quality)
         jpeg_data = byte_arr.data()
 
         if not jpeg_data or len(jpeg_data) > 65000:

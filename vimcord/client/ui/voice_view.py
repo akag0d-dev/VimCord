@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import Qt, pyqtSignal, QByteArray, QTimer
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout, QScrollArea
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout, QScrollArea, QMenu
 )
 
 
@@ -17,6 +17,7 @@ from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
 
 class VoiceUserWidget(QWidget):
     clicked = pyqtSignal(dict)
+    right_clicked = pyqtSignal(dict, object)
 
     def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, parent=None):
         super().__init__(parent)
@@ -106,18 +107,20 @@ class VoiceUserWidget(QWidget):
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
+        data = {
+            "user_id": self.user_id,
+            "username": self.username,
+            "avatar_color": self.avatar_color,
+            "avatar_image": self.avatar_image,
+            "is_muted": self.is_muted,
+            "is_deafened": self.is_deafened
+        }
         if event.button() == Qt.MouseButton.LeftButton:
-            data = {
-                "user_id": self.user_id,
-                "username": self.username,
-                "avatar_color": self.avatar_color,
-                "avatar_image": self.avatar_image,
-                "is_muted": self.is_muted,
-                "is_deafened": self.is_deafened
-            }
             # Emit asynchronously so that if opening a modal / switching calls
             # deletes this widget, it does not crash on a deleted C++ pointer
             QTimer.singleShot(0, lambda: self._safe_emit_clicked(data))
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.right_clicked.emit(data, event.globalPosition().toPoint())
 
     def _safe_emit_clicked(self, data: dict):
         try:
@@ -130,15 +133,23 @@ class VoiceView(QWidget):
     disconnect_clicked = pyqtSignal()
     screen_share_toggled = pyqtSignal(bool)  # is_sharing
     user_profile_requested = pyqtSignal(dict) # user_dict
+    peer_volume_changed = pyqtSignal(str, float) # user_id, volume
+    peer_mute_toggled = pyqtSignal(str, bool)    # user_id, muted
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("voice_view")
         self.channel_name = ""
+        self.current_user_id = ""
+        self.peer_volumes: Dict[str, float] = {}
+        self.peer_muted: set = set()
         self.user_widgets: Dict[str, VoiceUserWidget] = {}
         self.is_screen_sharing = False
 
         self._init_ui()
+
+    def set_current_user_id(self, user_id: str):
+        self.current_user_id = user_id
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -163,9 +174,18 @@ class VoiceView(QWidget):
         self.title_label.setStyleSheet("color: #23a55a; font-weight: bold; font-size: 13px;")
         sb_layout.addWidget(self.title_label)
 
-        badge = QLabel("24 kHz HD")
-        badge.setStyleSheet("color: #949ba4; font-size: 11px;")
-        sb_layout.addWidget(badge)
+        # Ping & server IP indicator
+        self.connection_label = QLabel("🟢 RTC | Ping: -- ms | IP: --")
+        self.connection_label.setStyleSheet("""
+            color: #949ba4;
+            font-size: 11px;
+            font-family: monospace;
+            background-color: #1a1b1e;
+            padding: 3px 8px;
+            border-radius: 4px;
+        """)
+        sb_layout.addWidget(self.connection_label)
+
         sb_layout.addStretch(1)
 
         # Screen Share toggle button
@@ -228,6 +248,14 @@ class VoiceView(QWidget):
         self.channel_name = channel_name
         self.title_label.setText(f"Подключено: {channel_name}")
 
+    def update_connection_info(self, ping_ms: int = 0, server_ip: str = "127.0.0.1", port: Optional[int] = None, *args, **kwargs):
+        addr_str = f"{server_ip}:{port}" if port else str(server_ip)
+        if ping_ms > 0:
+            dot = "🟢" if ping_ms < 60 else ("🟡" if ping_ms < 150 else "🔴")
+            self.connection_label.setText(f"{dot} {ping_ms} ms | IP: {addr_str}")
+        else:
+            self.connection_label.setText(f"🟢 Подключено | IP: {addr_str}")
+
     def update_participants(self, users: List[Dict[str, Any]]):
         for w in self.user_widgets.values():
             self.grid_layout.removeWidget(w)
@@ -251,10 +279,69 @@ class VoiceView(QWidget):
                 is_deafened=is_deaf
             )
             w.clicked.connect(self.user_profile_requested.emit)
+            w.right_clicked.connect(self._on_user_right_clicked)
             row = idx // cols
             col = idx % cols
             self.grid_layout.addWidget(w, row, col)
             self.user_widgets[uid] = w
+
+    def _on_user_right_clicked(self, user_info: dict, pos):
+        user_id = user_info.get("user_id")
+        if not user_id:
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #111214;
+                color: #dbdee1;
+                border: 1px solid #232428;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #5865F2;
+                color: #ffffff;
+            }
+        """)
+
+        # Profile
+        profile_action = menu.addAction("👤 Профиль")
+        profile_action.triggered.connect(lambda: self.user_profile_requested.emit(user_info))
+
+        # Only provide volume & mute for other users
+        if user_id != self.current_user_id:
+            menu.addSeparator()
+            is_muted = user_id in self.peer_muted
+            mute_text = "🔊 Включить звук пользователя" if is_muted else "🔇 Заглушить для себя"
+            mute_action = menu.addAction(mute_text)
+            mute_action.triggered.connect(lambda: self._toggle_peer_mute(user_id))
+
+            vol_menu = menu.addMenu("🎚️ Громкость пользователя")
+            current_vol = self.peer_volumes.get(user_id, 1.0)
+            for pct in [50, 100, 150, 200]:
+                check = " ✓" if abs(current_vol - (pct / 100.0)) < 0.05 else ""
+                act = vol_menu.addAction(f"{pct}%{check}")
+                val = pct / 100.0
+                act.triggered.connect(lambda checked=False, u=user_id, v=val: self._set_peer_volume(u, v))
+
+        menu.exec(pos)
+
+    def _toggle_peer_mute(self, user_id: str):
+        if user_id in self.peer_muted:
+            self.peer_muted.discard(user_id)
+            self.peer_mute_toggled.emit(user_id, False)
+        else:
+            self.peer_muted.add(user_id)
+            self.peer_mute_toggled.emit(user_id, True)
+
+    def _set_peer_volume(self, user_id: str, volume: float):
+        self.peer_volumes[user_id] = volume
+        self.peer_volume_changed.emit(user_id, volume)
 
     def set_user_media_state(self, user_id: str, is_muted: bool, is_deafened: bool):
         if user_id in self.user_widgets:

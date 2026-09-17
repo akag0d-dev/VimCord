@@ -6,7 +6,7 @@ import collections
 import logging
 import threading
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import sounddevice as sd
 
@@ -46,6 +46,16 @@ class AudioManager:
         self.output_volume: float = 1.0
         self.mic_volume: float = 1.0
         self.loopback_test: bool = False
+
+        # Advanced Audio Features
+        self.peer_volumes: Dict[str, float] = {}
+        self.peer_muted: set = set()
+        self.ptt_mode: bool = False
+        self.ptt_active: bool = False
+        self.noise_suppression: bool = True
+        self._recording_voice_msg: bool = False
+        self._voice_msg_frames: List[bytes] = []
+        self._voice_msg_start_time: float = 0.0
 
         # Ringtone playback state
         self._ringtone_type: Optional[str] = None
@@ -201,6 +211,59 @@ class AudioManager:
             self._ringtone_pos = 0
             self._ringtone_data = b""
 
+    def set_peer_volume(self, user_id: str, volume: float):
+        """Sets individual peer playback volume (0.0 to 2.0)."""
+        self.peer_volumes[user_id] = max(0.0, min(2.0, volume))
+
+    def get_peer_volume(self, user_id: str) -> float:
+        return self.peer_volumes.get(user_id, 1.0)
+
+    def set_peer_muted(self, user_id: str, muted: bool):
+        """Mutes a peer locally without affecting others."""
+        if muted:
+            self.peer_muted.add(user_id)
+        else:
+            self.peer_muted.discard(user_id)
+
+    def is_peer_muted(self, user_id: str) -> bool:
+        return user_id in self.peer_muted
+
+    def set_ptt_mode(self, enabled: bool):
+        self.ptt_mode = enabled
+
+    def set_ptt_active(self, active: bool):
+        self.ptt_active = active
+
+    def set_noise_suppression(self, enabled: bool):
+        self.noise_suppression = enabled
+
+    def start_recording_voice_msg(self):
+        """Starts recording incoming microphone input for a voice message."""
+        with self._lock:
+            self._voice_msg_frames = []
+            self._voice_msg_start_time = time.time()
+            self._recording_voice_msg = True
+
+    def stop_recording_voice_msg(self) -> Tuple[str, float]:
+        """Stops recording and returns (base64_pcm, duration_seconds)."""
+        import base64
+        with self._lock:
+            self._recording_voice_msg = False
+            raw_pcm = b"".join(self._voice_msg_frames)
+            duration = max(0.2, time.time() - self._voice_msg_start_time)
+            self._voice_msg_frames = []
+            b64_str = base64.b64encode(raw_pcm).decode("ascii")
+            return b64_str, round(duration, 1)
+
+    def play_voice_msg(self, data_b64: str):
+        """Plays a received base64-encoded voice message."""
+        import base64
+        try:
+            raw_pcm = base64.b64decode(data_b64)
+            self.play_sound_effect(raw_pcm)
+        except Exception as e:
+            logger.error(f"Error playing voice message: {e}")
+
     def _input_callback(self, indata, frames, time_info, status):
         """Microphone capture callback."""
         if not self._is_running:
@@ -210,6 +273,11 @@ class AudioManager:
         if self.mic_volume != 1.0:
             raw_bytes = adjust_volume(raw_bytes, self.mic_volume)
 
+        # Record into voice message if active
+        if self._recording_voice_msg:
+            with self._lock:
+                self._voice_msg_frames.append(raw_bytes)
+
         rms = calculate_rms(raw_bytes)
         above_threshold = (rms >= self.vad_threshold)
         if above_threshold:
@@ -217,14 +285,24 @@ class AudioManager:
         elif self.hangover_counter > 0:
             self.hangover_counter -= 1
 
-        is_speaking = False if self.is_muted else (above_threshold or self.hangover_counter > 0)
+        if self.is_muted:
+            is_speaking = False
+        elif self.ptt_mode:
+            is_speaking = self.ptt_active
+        else:
+            is_speaking = (above_threshold or self.hangover_counter > 0)
+
         self.is_speaking = is_speaking
+
+        # Noise suppression: zero-out noise when not speaking
+        if self.noise_suppression and not is_speaking:
+            raw_bytes = b"\x00" * len(raw_bytes)
 
         if self.loopback_test and not self.is_muted:
             self.add_peer_audio("__loopback__", raw_bytes)
 
         if self.on_mic_frame:
-            payload = b"" if self.is_muted else raw_bytes
+            payload = b"" if (self.is_muted or (self.ptt_mode and not self.ptt_active)) else raw_bytes
             self.on_mic_frame(payload, is_speaking, rms)
 
     def _output_callback(self, outdata, frames, time_info, status):
@@ -243,7 +321,15 @@ class AudioManager:
             dead_peers = []
             for uid, buf in self._peer_buffers.items():
                 if buf:
-                    active_streams.append(buf.popleft())
+                    raw_chunk = buf.popleft()
+                    # Per-user local mute
+                    if uid in self.peer_muted:
+                        continue
+                    # Per-user volume adjustment
+                    peer_vol = self.peer_volumes.get(uid, 1.0)
+                    if peer_vol != 1.0:
+                        raw_chunk = adjust_volume(raw_chunk, peer_vol)
+                    active_streams.append(raw_chunk)
                 elif now - self._peer_last_received.get(uid, 0) > 3.0:
                     dead_peers.append(uid)
             

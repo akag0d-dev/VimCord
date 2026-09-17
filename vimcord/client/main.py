@@ -26,8 +26,21 @@ def main():
     parser.add_argument("--auto", action="store_true", help="Auto-connect without login dialog")
     args = parser.parse_args()
 
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("akag0d.vimcord.desktop.client")
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_THEME_QSS)
+
+    from pathlib import Path
+    from PyQt6.QtGui import QIcon
+    icon_path = Path(__file__).resolve().parents[2] / "icon.ico"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     server_host = args.host
     tcp_port = args.tcp_port
@@ -116,6 +129,7 @@ def main():
     logged_in_name = login_data.get("username", username)
     avatar_color = login_data.get("avatar_color", "#5865F2")
     avatar_image = login_data.get("avatar_image", "")
+    bio = login_data.get("bio", "")
     status_text = login_data.get("status_text", "В сети")
     rooms = login_data.get("rooms", [])
     users = login_data.get("users", [])
@@ -133,7 +147,8 @@ def main():
         friends=friends,
         host=server_host,
         udp_port=udp_port,
-        avatar_image=avatar_image
+        avatar_image=avatar_image,
+        bio=bio
     )
     main_win.show()
 

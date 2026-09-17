@@ -111,6 +111,13 @@ class VoiceConnectedBar(QWidget):
         self.channel_btn.setText(display_text)
         self.channel_btn.setToolTip(f"{channel_name} ({room_name})")
 
+    def update_ping(self, ping_ms: int):
+        if ping_ms > 0:
+            quality_dot = "🟢" if ping_ms < 60 else ("🟡" if ping_ms < 150 else "🔴")
+            self.status_lbl.setText(f"{quality_dot} Голос | {ping_ms} ms")
+        else:
+            self.status_lbl.setText("● Голос подключен")
+
     def set_screen_sharing(self, is_sharing: bool):
         self.is_sharing = is_sharing
         if is_sharing:

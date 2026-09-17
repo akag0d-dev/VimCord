@@ -44,11 +44,16 @@ class Database:
                     status_text TEXT DEFAULT 'В сети',
                     avatar_color TEXT DEFAULT '#5865F2',
                     avatar_image TEXT DEFAULT '',
+                    bio TEXT DEFAULT '',
                     created_at REAL NOT NULL
                 )
             """)
             try:
                 cur.execute("ALTER TABLE users ADD COLUMN avatar_image TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''")
             except Exception:
                 pass
 
@@ -102,9 +107,24 @@ class Database:
                     sender_id TEXT NOT NULL,
                     sender_name TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    timestamp REAL NOT NULL
+                    timestamp REAL NOT NULL,
+                    image_data TEXT DEFAULT '',
+                    voice_data TEXT DEFAULT '',
+                    voice_duration REAL DEFAULT 0.0
                 )
             """)
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN image_data TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN voice_data TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN voice_duration REAL DEFAULT 0.0")
+            except Exception:
+                pass
             cur.execute("CREATE INDEX IF NOT EXISTS idx_msg_target ON messages(target_id, timestamp)")
 
             # 7. Friendships table
@@ -192,7 +212,8 @@ class Database:
             "username": username,
             "status_text": "В сети",
             "avatar_color": avatar_color,
-            "avatar_image": ""
+            "avatar_image": "",
+            "bio": ""
         }
 
     def authenticate_user(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
@@ -213,11 +234,12 @@ class Database:
                     "username": user_dict["username"],
                     "status_text": user_dict.get("status_text", "В сети"),
                     "avatar_color": user_dict.get("avatar_color", "#5865F2"),
-                    "avatar_image": user_dict.get("avatar_image", "")
+                    "avatar_image": user_dict.get("avatar_image", ""),
+                    "bio": user_dict.get("bio", "")
                 }
             return False, "Неверный пароль", None
 
-    def update_profile(self, user_id: str, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None) -> Tuple[bool, str]:
+    def update_profile(self, user_id: str, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None, bio: Optional[str] = None) -> Tuple[bool, str]:
         with self._get_conn() as conn:
             cur = conn.cursor()
             updates = []
@@ -234,6 +256,9 @@ class Database:
             if avatar_image is not None:
                 updates.append("avatar_image = ?")
                 params.append(avatar_image)
+            if bio is not None:
+                updates.append("bio = ?")
+                params.append(bio.strip())
 
             if not updates:
                 return True, "Нет изменений"
@@ -268,14 +293,14 @@ class Database:
     def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image FROM users WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
             return dict(row) if row else None
 
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image FROM users WHERE username = ?", (username,))
+            cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users WHERE username = ?", (username,))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -286,27 +311,41 @@ class Database:
         """Computes a canonical target_id for 1-on-1 private messaging."""
         return f"dm:{min(uid1, uid2)}:{max(uid1, uid2)}"
 
-    def save_message(self, msg_id: str, target_type: str, target_id: str, sender_id: str, sender_name: str, content: str, timestamp: float):
+    def save_message(self, msg_id: str, target_type: str, target_id: str, sender_id: str, sender_name: str, content: str, timestamp: float, image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT OR REPLACE INTO messages (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO messages (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp)
+                (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration)
             )
             conn.commit()
+
+    def delete_message(self, msg_id: str, user_id: str) -> bool:
+        """Deletes a message if sent by user_id."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM messages WHERE msg_id = ? AND sender_id = ?", (msg_id, user_id))
+            conn.commit()
+            return cur.rowcount > 0
 
     def get_messages(self, target_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT msg_id, target_type, target_id, sender_id, sender_name, content, timestamp
-                FROM messages
-                WHERE target_id = ?
-                ORDER BY timestamp ASC
+                SELECT m.msg_id, m.target_type, m.target_id, m.sender_id, m.sender_name, m.content, m.timestamp,
+                       COALESCE(m.image_data, '') as image_data,
+                       COALESCE(m.voice_data, '') as voice_data,
+                       COALESCE(m.voice_duration, 0.0) as voice_duration,
+                       COALESCE(u.avatar_color, '#5865F2') as avatar_color,
+                       COALESCE(u.avatar_image, '') as avatar_image
+                FROM messages m
+                LEFT JOIN users u ON m.sender_id = u.user_id
+                WHERE m.target_id = ?
+                ORDER BY m.timestamp ASC
                 LIMIT ?
                 """,
                 (target_id, limit)
@@ -486,3 +525,61 @@ class Database:
                 r_dict["channels"] = [dict(c) for c in cur.fetchall()]
                 rooms.append(r_dict)
             return rooms
+
+    def get_user_rooms(self, user_id: str) -> List[Dict[str, Any]]:
+        """Loads only rooms where user is a member/owner, or the default public room."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT DISTINCT r.* FROM rooms r
+                LEFT JOIN room_members rm ON r.room_id = rm.room_id
+                WHERE r.room_id = 'room-default' OR rm.user_id = ? OR r.owner_id = ?
+                ORDER BY r.created_at ASC
+                """,
+                (user_id, user_id)
+            )
+            rooms = []
+            for r in cur.fetchall():
+                r_dict = dict(r)
+                cur.execute("SELECT * FROM channels WHERE room_id = ? ORDER BY created_at ASC", (r["room_id"],))
+                r_dict["channels"] = [dict(c) for c in cur.fetchall()]
+                rooms.append(r_dict)
+            return rooms
+
+    def leave_room(self, room_id: str, user_id: str) -> Tuple[bool, str]:
+        """User leaves a room. If user is owner, the room is deleted."""
+        if room_id == "room-default":
+            return False, "Нельзя покинуть главный сервер"
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT owner_id FROM rooms WHERE room_id = ?", (room_id,))
+            row = cur.fetchone()
+            if not row:
+                return False, "Сервер не найден"
+            if row["owner_id"] == user_id:
+                self.delete_room(room_id)
+                return True, "Сервер удален создателем"
+            else:
+                cur.execute("DELETE FROM room_members WHERE room_id = ? AND user_id = ?", (room_id, user_id))
+                conn.commit()
+                return True, "Вы покинули сервер"
+
+    def get_room_members(self, room_id: str) -> List[Dict[str, Any]]:
+        """Returns list of members belonging to room_id."""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            if room_id == "room-default":
+                cur.execute("SELECT user_id, username, status_text, avatar_color, avatar_image, bio FROM users")
+                return [dict(row) for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT u.user_id, u.username, u.status_text, u.avatar_color, u.avatar_image, u.bio
+                FROM room_members rm
+                JOIN users u ON rm.user_id = u.user_id
+                WHERE rm.room_id = ?
+                """,
+                (room_id,)
+            )
+            return [dict(row) for row in cur.fetchall()]
+

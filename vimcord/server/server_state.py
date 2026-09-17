@@ -10,11 +10,12 @@ from vimcord.server.db import Database
 
 
 class User:
-    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = ""):
+    def __init__(self, user_id: str, username: str, tcp_writer=None, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = ""):
         self.user_id = user_id
         self.username = username
         self.avatar_color = avatar_color
         self.avatar_image = avatar_image
+        self.bio = bio
         self.status_text = status_text
         self.tcp_writer = tcp_writer
         self.udp_addr: Optional[Tuple[str, int]] = None
@@ -31,6 +32,7 @@ class User:
             "username": self.username,
             "avatar_color": self.avatar_color,
             "avatar_image": self.avatar_image,
+            "bio": self.bio,
             "status_text": self.status_text,
             "current_room_id": self.current_room_id,
             "current_voice_channel_id": self.current_voice_channel_id,
@@ -106,14 +108,15 @@ class ServerState:
                 r.channels[ch.channel_id] = ch
             self.rooms[r.room_id] = r
 
-    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "") -> User:
+    def add_user(self, user_id: str, username: str, tcp_writer, avatar_color: str = "#5865F2", status_text: str = "В сети", avatar_image: str = "", bio: str = "") -> User:
         user = User(
             user_id=user_id,
             username=username,
             tcp_writer=tcp_writer,
             avatar_color=avatar_color,
             status_text=status_text,
-            avatar_image=avatar_image
+            avatar_image=avatar_image,
+            bio=bio
         )
         self.users[user_id] = user
         return user

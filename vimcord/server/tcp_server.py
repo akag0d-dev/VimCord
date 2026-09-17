@@ -115,11 +115,13 @@ class TCPServer:
                         tcp_writer=writer,
                         avatar_color=u_data.get("avatar_color", "#5865F2"),
                         status_text=u_data.get("status_text", "В сети"),
-                        avatar_image=u_data.get("avatar_image", "")
+                        avatar_image=u_data.get("avatar_image", ""),
+                        bio=u_data.get("bio", "")
                     )
 
-                    # Return full initial state
+                    # Return full initial state - send user's rooms (isolation)
                     friends = self.db.get_friends(current_user.user_id)
+                    user_rooms = self.db.get_user_rooms(current_user.user_id)
                     resp = {
                         "type": "login_resp",
                         "success": True,
@@ -127,8 +129,9 @@ class TCPServer:
                         "username": current_user.username,
                         "avatar_color": current_user.avatar_color,
                         "avatar_image": current_user.avatar_image,
+                        "bio": current_user.bio,
                         "status_text": current_user.status_text,
-                        "rooms": self.server_state.get_all_rooms_dict(),
+                        "rooms": user_rooms,
                         "users": self.server_state.get_all_users_dict(),
                         "friends": friends
                     }
@@ -165,12 +168,15 @@ class TCPServer:
                     writer.write(encode_json_message(resp))
                     await writer.drain()
 
-                # 4. SEND MESSAGE
+                # 4. SEND MESSAGE (text, photo attachments, voice messages)
                 elif msg_type == "send_msg":
                     t_type = msg.get("target_type")
                     t_id = msg.get("target_id")
                     content = msg.get("content", "").strip()
-                    if content:
+                    image_data = msg.get("image_data", "")
+                    voice_data = msg.get("voice_data", "")
+                    voice_duration = float(msg.get("voice_duration", 0.0))
+                    if content or image_data or voice_data:
                         now = time.time()
                         msg_id = "msg-" + uuid.uuid4().hex[:8]
                         if t_type == "channel":
@@ -179,7 +185,10 @@ class TCPServer:
                             db_key = self.db.get_canonical_dm_id(current_user.user_id, t_id)
 
                         # Save to database
-                        self.db.save_message(msg_id, t_type, db_key, current_user.user_id, current_user.username, content, now)
+                        self.db.save_message(
+                            msg_id, t_type, db_key, current_user.user_id, current_user.username,
+                            content, now, image_data=image_data, voice_data=voice_data, voice_duration=voice_duration
+                        )
 
                         chat_msg = {
                             "type": "new_msg",
@@ -188,7 +197,12 @@ class TCPServer:
                             "target_id": t_id,
                             "sender_id": current_user.user_id,
                             "sender_name": current_user.username,
+                            "avatar_color": current_user.avatar_color,
+                            "avatar_image": current_user.avatar_image,
                             "content": content,
+                            "image_data": image_data,
+                            "voice_data": voice_data,
+                            "voice_duration": voice_duration,
                             "timestamp": now
                         }
                         if t_type == "channel":
@@ -198,14 +212,83 @@ class TCPServer:
                             await self.send_to_user(t_id, chat_msg)
                             await self.send_to_user(current_user.user_id, chat_msg)
 
-                # 5. CREATE ROOM
+                # 4.1 DELETE MESSAGE
+                elif msg_type == "delete_msg":
+                    msg_id = msg.get("msg_id")
+                    target_type = msg.get("target_type")
+                    target_id = msg.get("target_id")
+                    if msg_id and self.db.delete_message(msg_id, current_user.user_id):
+                        del_event = {
+                            "type": "msg_deleted",
+                            "msg_id": msg_id,
+                            "target_type": target_type,
+                            "target_id": target_id
+                        }
+                        if target_type == "channel":
+                            await self.broadcast(del_event)
+                        elif target_type == "dm":
+                            await self.send_to_user(target_id, del_event)
+                            await self.send_to_user(current_user.user_id, del_event)
+
+                # 5. CREATE ROOM (Room isolation: only creator receives room_created)
                 elif msg_type == "create_room":
                     name = msg.get("name", "Новая комната").strip() or "Новая комната"
                     room = self.server_state.create_room(name=name, owner_id=current_user.user_id)
-                    await self.broadcast({
+                    await self.send_to_user(current_user.user_id, {
                         "type": "room_created",
                         "room": room.to_dict()
                     })
+
+                # 5.1 LEAVE ROOM
+                elif msg_type == "leave_room":
+                    room_id = msg.get("room_id")
+                    ok, res_msg = self.db.leave_room(room_id, current_user.user_id)
+                    writer.write(encode_json_message({
+                        "type": "leave_room_resp",
+                        "success": ok,
+                        "message": res_msg,
+                        "room_id": room_id
+                    }))
+                    await writer.drain()
+                    if ok:
+                        if current_user.current_room_id == room_id:
+                            prev = self.server_state.leave_voice(current_user.user_id)
+                            if prev:
+                                await self.broadcast({
+                                    "type": "voice_state_update",
+                                    "user_id": current_user.user_id,
+                                    "room_id": prev[0],
+                                    "channel_id": prev[1],
+                                    "action": "leave"
+                                })
+                        if res_msg == "Сервер удален создателем":
+                            if room_id in self.server_state.rooms:
+                                del self.server_state.rooms[room_id]
+                            await self.broadcast({
+                                "type": "room_deleted",
+                                "room_id": room_id
+                            })
+
+                # 5.2 GET ROOM MEMBERS (for right-side sidebar)
+                elif msg_type == "get_room_members":
+                    room_id = msg.get("room_id")
+                    members = self.db.get_room_members(room_id)
+                    for m in members:
+                        m["online"] = m["user_id"] in self.server_state.users
+                    writer.write(encode_json_message({
+                        "type": "room_members_resp",
+                        "room_id": room_id,
+                        "members": members
+                    }))
+                    await writer.drain()
+
+                # 5.3 PING / PONG
+                elif msg_type == "ping":
+                    writer.write(encode_json_message({
+                        "type": "pong",
+                        "timestamp": msg.get("timestamp", time.time())
+                    }))
+                    await writer.drain()
 
                 # 6. DELETE ROOM
                 elif msg_type == "delete_room":
@@ -314,12 +397,14 @@ class TCPServer:
                     new_status = msg.get("status_text")
                     new_color = msg.get("avatar_color")
                     new_avatar = msg.get("avatar_image")
+                    new_bio = msg.get("bio")
                     ok, res_msg = self.db.update_profile(
                         current_user.user_id,
                         username=new_uname,
                         status_text=new_status,
                         avatar_color=new_color,
-                        avatar_image=new_avatar
+                        avatar_image=new_avatar,
+                        bio=new_bio
                     )
                     if ok:
                         if new_uname:
@@ -330,6 +415,8 @@ class TCPServer:
                             current_user.avatar_color = new_color
                         if new_avatar is not None:
                             current_user.avatar_image = new_avatar
+                        if new_bio is not None:
+                            current_user.bio = new_bio
 
                         await self.broadcast({
                             "type": "user_presence",

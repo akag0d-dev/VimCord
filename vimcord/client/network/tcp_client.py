@@ -35,13 +35,19 @@ class TCPClientSignals(QObject):
 
     # Chat & history
     chat_message = pyqtSignal(dict)               # message dict
+    message_deleted = pyqtSignal(str, str, str)   # msg_id, target_type, target_id
     history_response = pyqtSignal(str, str, list) # target_type, target_id, messages list
 
     # Invites & Friends
     room_invite_created = pyqtSignal(str, str)    # room_id, code
     room_invite_joined = pyqtSignal(bool, dict)   # success, room_data_or_error
+    leave_room_resp = pyqtSignal(bool, str, str)  # success, message, room_id
+    room_members_resp = pyqtSignal(str, list)     # room_id, members_list
     friends_update = pyqtSignal(list)             # list of friend dicts
     friend_request_resp = pyqtSignal(bool, str)   # success, message
+
+    # Latency / Ping
+    pong = pyqtSignal(float)                      # echoed timestamp
 
     # Profile & settings
     profile_update_resp = pyqtSignal(bool, str, dict) # success, message, user_dict
@@ -161,7 +167,24 @@ class TCPClient:
     def send_decline_friend_request(self, peer_id: str):
         self.send_message({"type": "decline_friend_request", "peer_id": peer_id})
 
-    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None):
+    def send_leave_room(self, room_id: str):
+        self.send_message({"type": "leave_room", "room_id": room_id})
+
+    def send_get_room_members(self, room_id: str):
+        self.send_message({"type": "get_room_members", "room_id": room_id})
+
+    def send_ping(self, timestamp: Optional[float] = None):
+        self.send_message({"type": "ping", "timestamp": timestamp or time.time()})
+
+    def send_delete_message(self, msg_id: str, target_type: str, target_id: str):
+        self.send_message({
+            "type": "delete_msg",
+            "msg_id": msg_id,
+            "target_type": target_type,
+            "target_id": target_id
+        })
+
+    def send_update_profile(self, username: Optional[str] = None, status_text: Optional[str] = None, avatar_color: Optional[str] = None, avatar_image: Optional[str] = None, bio: Optional[str] = None):
         msg = {"type": "update_profile"}
         if username:
             msg["username"] = username
@@ -171,6 +194,8 @@ class TCPClient:
             msg["avatar_color"] = avatar_color
         if avatar_image is not None:
             msg["avatar_image"] = avatar_image
+        if bio is not None:
+            msg["bio"] = bio
         self.send_message(msg)
 
     def send_get_profile(self, user_id: str):
@@ -188,12 +213,15 @@ class TCPClient:
     def send_leave_voice(self):
         self.send_message({"type": "leave_voice"})
 
-    def send_chat_message(self, target_type: str, target_id: str, content: str):
+    def send_chat_message(self, target_type: str, target_id: str, content: str = "", image_data: str = "", voice_data: str = "", voice_duration: float = 0.0):
         self.send_message({
             "type": "send_msg",
             "target_type": target_type,
             "target_id": target_id,
-            "content": content
+            "content": content,
+            "image_data": image_data,
+            "voice_data": voice_data,
+            "voice_duration": voice_duration
         })
 
     def send_call_start(self, target_user_id: str):
@@ -280,6 +308,13 @@ class TCPClient:
         elif mtype == "new_msg":
             self.signals.chat_message.emit(msg)
 
+        elif mtype == "msg_deleted":
+            self.signals.message_deleted.emit(
+                msg.get("msg_id", ""),
+                msg.get("target_type", ""),
+                msg.get("target_id", "")
+            )
+
         elif mtype == "history_resp":
             self.signals.history_response.emit(
                 msg.get("target_type", ""),
@@ -292,6 +327,22 @@ class TCPClient:
 
         elif mtype == "room_invite_joined":
             self.signals.room_invite_joined.emit(msg.get("success", False), msg)
+
+        elif mtype == "leave_room_resp":
+            self.signals.leave_room_resp.emit(
+                msg.get("success", False),
+                msg.get("message", ""),
+                msg.get("room_id", "")
+            )
+
+        elif mtype == "room_members_resp":
+            self.signals.room_members_resp.emit(
+                msg.get("room_id", ""),
+                msg.get("members", [])
+            )
+
+        elif mtype == "pong":
+            self.signals.pong.emit(float(msg.get("timestamp", 0.0)))
 
         elif mtype == "friends_update":
             self.signals.friends_update.emit(msg.get("friends", []))
