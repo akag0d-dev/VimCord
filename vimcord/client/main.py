@@ -55,6 +55,8 @@ def main():
         height=620,
         min_size=(400, 500),
         background_color="#1e1f22",
+        frameless=True,
+        easy_drag=False,
         zoomable=False
     )
     api.set_window(window)

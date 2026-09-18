@@ -149,6 +149,13 @@ class VimCordAPI:
             "theme": cfg.get("theme", "dark"),
             "ptt_mode": self._audio_manager.ptt_mode,
             "ptt_key": getattr(self._hotkey_mgr, "ptt_key", "Space"),
+            "mic_volume": int(getattr(self._audio_manager, "mic_volume", 1.0) * 100),
+            "output_volume": int(getattr(self._audio_manager, "output_volume", 1.0) * 100),
+            "vad_threshold": getattr(self._audio_manager, "vad_threshold", 0.015),
+            "dnd_mode": cfg.get("dnd_mode", False),
+            "stream_resolution": cfg.get("stream_resolution", "720p"),
+            "stream_fps": cfg.get("stream_fps", 15),
+            "stream_quality": cfg.get("stream_quality", 45),
             "auto_login": cfg.get("auto_login", False),
             "saved_username": cfg.get("username", "") or cfg.get("saved_username", ""),
             "saved_password": cfg.get("saved_password", "") if cfg.get("auto_login") else ""
@@ -234,14 +241,22 @@ class VimCordAPI:
             cfg_updates["saved_password"] = password
         save_config(cfg_updates)
 
+        # Fresh connection to server
         if not self._tcp_client.sock or not self._tcp_client._is_running:
             self._tcp_client.disconnect()
             ok = self._tcp_client.connect_to_server(self._server_host, self._server_tcp_port)
             if not ok:
-                return {"success": False, "message": f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"}
+                err_msg = f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"
+                self.dispatch_event("login_response", {"success": False, "data": {"message": err_msg}})
+                return {"success": False, "message": err_msg}
 
-        self._tcp_client.send_login(username, password)
-        return {"success": True, "pending": True}
+        try:
+            self._tcp_client.send_login(username, password)
+            return {"success": True, "pending": True}
+        except Exception as e:
+            err_msg = f"Failed to send login: {e}"
+            self.dispatch_event("login_response", {"success": False, "data": {"message": err_msg}})
+            return {"success": False, "message": err_msg}
 
     def register(self, username: str, password: str = "", host: str = "", tcp_port: int = 0, udp_port: int = 0):
         self._server_host = host or self._server_host or DEFAULT_HOST
@@ -252,10 +267,17 @@ class VimCordAPI:
             self._tcp_client.disconnect()
             ok = self._tcp_client.connect_to_server(self._server_host, self._server_tcp_port)
             if not ok:
-                return {"success": False, "message": f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"}
+                err_msg = f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"
+                self.dispatch_event("register_response", {"success": False, "message": err_msg})
+                return {"success": False, "message": err_msg}
 
-        self._tcp_client.send_register(username, password)
-        return {"success": True, "pending": True}
+        try:
+            self._tcp_client.send_register(username, password)
+            return {"success": True, "pending": True}
+        except Exception as e:
+            err_msg = f"Failed to send register: {e}"
+            self.dispatch_event("register_response", {"success": False, "message": err_msg})
+            return {"success": False, "message": err_msg}
 
     def logout(self):
         """Logs out of current session, clears auto_login, and resets window size to login size."""
@@ -558,6 +580,44 @@ class VimCordAPI:
 
     def set_peer_muted(self, peer_id: str, muted: bool):
         self._audio_manager.set_peer_muted(peer_id, muted)
+
+    def set_mic_volume(self, volume: float):
+        vol = max(0.0, min(2.0, float(volume)))
+        self._audio_manager.mic_volume = vol
+        save_config({"mic_volume": int(vol * 100)})
+
+    def set_output_volume(self, volume: float):
+        vol = max(0.0, min(2.0, float(volume)))
+        self._audio_manager.output_volume = vol
+        save_config({"output_volume": int(vol * 100)})
+
+    def set_vad_threshold(self, threshold: float):
+        thresh = max(0.001, min(0.2, float(threshold)))
+        self._audio_manager.vad_threshold = thresh
+        save_config({"vad_threshold": thresh})
+
+    def start_mic_test(self):
+        self._audio_manager.loopback_test = True
+        def intercept(data, speaking, rms):
+            pct = min(100, int(rms * 600))
+            self.dispatch_event("mic_test_level", {"level": pct, "speaking": speaking})
+        self._audio_manager.on_mic_frame = intercept
+
+    def stop_mic_test(self):
+        self._audio_manager.loopback_test = False
+        self._audio_manager.on_mic_frame = None
+        self.dispatch_event("mic_test_level", {"level": 0, "speaking": False})
+
+    def set_stream_settings(self, resolution: str, fps: int, quality: int):
+        save_config({
+            "stream_resolution": resolution,
+            "stream_fps": int(fps),
+            "stream_quality": int(quality)
+        })
+
+    def set_dnd_mode(self, enabled: bool):
+        save_config({"dnd_mode": bool(enabled)})
+        self.dispatch_event("dnd_changed", {"enabled": bool(enabled)})
 
     # ---------------- Screen Sharing ----------------
 

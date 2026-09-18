@@ -107,6 +107,40 @@ class TestVimCordAPIBridge(unittest.TestCase):
         api._hotkey_mgr.stop()
         api._tray.stop()
 
+    def test_volume_and_vad_settings(self):
+        api = VimCordAPI()
+        api.set_mic_volume(1.5)
+        self.assertAlmostEqual(api._audio_manager.mic_volume, 1.5)
+
+        api.set_output_volume(0.8)
+        self.assertAlmostEqual(api._audio_manager.output_volume, 0.8)
+
+        api.set_vad_threshold(0.025)
+        self.assertAlmostEqual(api._audio_manager.vad_threshold, 0.025)
+
+        # Test mic test start & stop
+        api.start_mic_test()
+        self.assertTrue(api._audio_manager.loopback_test)
+        api.stop_mic_test()
+        self.assertFalse(api._audio_manager.loopback_test)
+
+        api._hotkey_mgr.stop()
+        api._tray.stop()
+
+    def test_stream_and_dnd_settings(self):
+        api = VimCordAPI()
+        api.set_stream_settings("1080p", 60, 75)
+        api.set_dnd_mode(True)
+
+        state = api.get_initial_state()
+        self.assertEqual(state["stream_resolution"], "1080p")
+        self.assertEqual(state["stream_fps"], 60)
+        self.assertEqual(state["stream_quality"], 75)
+        self.assertTrue(state["dnd_mode"])
+
+        api._hotkey_mgr.stop()
+        api._tray.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
