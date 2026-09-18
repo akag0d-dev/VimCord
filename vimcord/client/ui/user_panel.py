@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 )
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.i18n import t
 
 
 class UserPanel(QWidget):
@@ -102,24 +103,29 @@ class UserPanel(QWidget):
 
         # Mic button
         self.mic_btn = QPushButton("🎙️")
-        self.mic_btn.setToolTip("Mute Microphone")
+        self.mic_btn.setToolTip(t("mute_mic"))
         self.mic_btn.setStyleSheet(btn_style_normal)
         self.mic_btn.clicked.connect(self._toggle_mic)
         layout.addWidget(self.mic_btn)
 
         # Deafen button
         self.deafen_btn = QPushButton("🎧")
-        self.deafen_btn.setToolTip("Deafen Audio")
+        self.deafen_btn.setToolTip(t("deafen_audio"))
         self.deafen_btn.setStyleSheet(btn_style_normal)
         self.deafen_btn.clicked.connect(self._toggle_deafen)
         layout.addWidget(self.deafen_btn)
 
         # Settings button
         self.settings_btn = QPushButton("⚙️")
-        self.settings_btn.setToolTip("User Settings")
+        self.settings_btn.setToolTip(t("user_settings"))
         self.settings_btn.setStyleSheet(btn_style_normal)
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.settings_btn)
+
+    def retranslate_ui(self):
+        self.mic_btn.setToolTip(t("mute_mic"))
+        self.deafen_btn.setToolTip(t("deafen_audio"))
+        self.settings_btn.setToolTip(t("user_settings"))
 
     def set_user(self, username: str, user_id: str, avatar_color: str = "#5865F2", status_text: str = "Online", avatar_image: str = "", display_name: str = ""):
         self.username = username
@@ -138,13 +144,19 @@ class UserPanel(QWidget):
         if is_speaking:
             self.avatar_label.setStyleSheet("""
                 QLabel {
-                    border: 2px solid #23a55a;
+                    border: 3px solid #23a55a;
                     border-radius: 18px;
                     background-color: transparent;
                 }
             """)
         else:
-            self.avatar_label.setStyleSheet("background: transparent; border: none;")
+            self.avatar_label.setStyleSheet("""
+                QLabel {
+                    border: 3px solid transparent;
+                    border-radius: 18px;
+                    background-color: transparent;
+                }
+            """)
 
     def _toggle_mic(self):
         self.is_muted = not self.is_muted

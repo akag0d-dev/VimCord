@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QFrame, QMenu, QSlider, QWidgetAction
 )
+from vimcord.client.i18n import t
 
 
 class MemberItemWidget(QWidget):
@@ -162,7 +163,7 @@ class MemberListWidget(QWidget):
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         
-        self.title_label = QLabel("MEMBERS")
+        self.title_label = QLabel(t("members"))
         self.title_label.setStyleSheet("color: #949ba4; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;")
         h_layout.addWidget(self.title_label)
         main_layout.addWidget(header)
@@ -231,7 +232,7 @@ class MemberListWidget(QWidget):
 
         # 1. Online Section
         if online_members:
-            sec_label = QLabel(f"ONLINE — {len(online_members)}")
+            sec_label = QLabel(f"{t('online').upper()} — {len(online_members)}")
             sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: 700; padding: 6px 8px 4px 8px;")
             self.content_layout.addWidget(sec_label)
 
@@ -243,7 +244,7 @@ class MemberListWidget(QWidget):
 
         # 2. Offline Section
         if offline_members:
-            sec_label = QLabel(f"OFFLINE — {len(offline_members)}")
+            sec_label = QLabel(f"{t('offline').upper()} — {len(offline_members)}")
             sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: 700; padding: 12px 8px 4px 8px;")
             self.content_layout.addWidget(sec_label)
 
@@ -253,7 +254,10 @@ class MemberListWidget(QWidget):
                 item_w.right_clicked.connect(self._on_member_right_clicked)
                 self.content_layout.addWidget(item_w)
 
-        self.title_label.setText(f"MEMBERS ({len(self.members)})")
+        self.title_label.setText(f"{t('members')} ({len(self.members)})")
+
+    def retranslate_ui(self):
+        self._refresh_list()
 
     def _on_member_clicked(self, user_id: str):
         self.view_profile_requested.emit(user_id)

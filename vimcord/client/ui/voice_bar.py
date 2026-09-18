@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 )
+from vimcord.client.i18n import t
 
 
 class VoiceConnectedBar(QWidget):
@@ -40,7 +41,7 @@ class VoiceConnectedBar(QWidget):
         info_layout.setSpacing(1)
 
         # Status text with green dot
-        self.status_lbl = QLabel("●  Voice Connected")
+        self.status_lbl = QLabel(f"●  {t('voice_connected')}")
         self.status_lbl.setStyleSheet("color: #23a55a; font-size: 11px; font-weight: bold;")
         info_layout.addWidget(self.status_lbl)
 
@@ -68,7 +69,7 @@ class VoiceConnectedBar(QWidget):
 
         # Screen Share button
         self.screen_btn = QPushButton("🖥️")
-        self.screen_btn.setToolTip("Share Screen")
+        self.screen_btn.setToolTip(t("screen_share"))
         self.screen_btn.setFixedSize(30, 30)
         self.screen_btn.setStyleSheet("""
             QPushButton {
@@ -86,7 +87,7 @@ class VoiceConnectedBar(QWidget):
 
         # Disconnect button
         self.disconnect_btn = QPushButton("📞")
-        self.disconnect_btn.setToolTip("Disconnect")
+        self.disconnect_btn.setToolTip(t("disconnect"))
         self.disconnect_btn.setFixedSize(30, 30)
         self.disconnect_btn.setStyleSheet("""
             QPushButton {
@@ -146,3 +147,8 @@ class VoiceConnectedBar(QWidget):
                 }
             """)
             self.screen_btn.setToolTip("Share Screen")
+
+    def retranslate_ui(self):
+        self.status_lbl.setText(f"●  {t('voice_connected')}")
+        self.screen_btn.setToolTip(t("stop_screen") if self.is_sharing else t("screen_share"))
+        self.disconnect_btn.setToolTip(t("disconnect"))

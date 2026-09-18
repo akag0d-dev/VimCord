@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QScrollArea, QFrame, QMessageBox
 )
+from vimcord.client.i18n import t
 
 
 class FriendItemWidget(QWidget):
@@ -169,9 +170,9 @@ class FriendsView(QWidget):
         icon_lbl.setStyleSheet("font-size: 18px;")
         tb_layout.addWidget(icon_lbl)
 
-        title = QLabel("Friends")
-        title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 15px;")
-        tb_layout.addWidget(title)
+        self.title_lbl = QLabel(t("friends"))
+        self.title_lbl.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 15px;")
+        tb_layout.addWidget(self.title_lbl)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
@@ -180,10 +181,10 @@ class FriendsView(QWidget):
         tb_layout.addWidget(sep)
 
         # Tab buttons
-        self.btn_online = QPushButton("Online")
-        self.btn_all = QPushButton("All")
-        self.btn_pending = QPushButton("Pending")
-        self.btn_add = QPushButton("Add Friend")
+        self.btn_online = QPushButton(t("online"))
+        self.btn_all = QPushButton(t("all"))
+        self.btn_pending = QPushButton(t("pending"))
+        self.btn_add = QPushButton(t("add_friend"))
 
         for b, tab in [
             (self.btn_online, "online"),
@@ -258,6 +259,20 @@ class FriendsView(QWidget):
 
     def set_online_users(self, online_users: Dict[str, Dict[str, Any]]):
         self.online_users = online_users
+        self._render_current_tab()
+
+    def retranslate_ui(self):
+        if hasattr(self, "title_lbl"):
+            self.title_lbl.setText(t("friends"))
+        if hasattr(self, "btn_online"):
+            self.btn_online.setText(t("online"))
+        if hasattr(self, "btn_all"):
+            self.btn_all.setText(t("all"))
+        if hasattr(self, "btn_pending"):
+            pending_count = sum(1 for f in self.friends if f.get("is_incoming"))
+            self.btn_pending.setText(f"{t('pending')} ({pending_count})" if pending_count > 0 else t("pending"))
+        if hasattr(self, "btn_add"):
+            self.btn_add.setText(t("add_friend"))
         self._render_current_tab()
 
     def _switch_tab(self, tab: str):

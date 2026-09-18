@@ -50,7 +50,7 @@ class ConnectionLostOverlay(QWidget):
         self.setObjectName("connection_lost_overlay")
         self.setStyleSheet("""
             QWidget#connection_lost_overlay {
-                background-color: rgba(18, 19, 22, 0.96);
+                background-color: #000000;
             }
         """)
         self.countdown_seconds = 10
@@ -275,8 +275,10 @@ class MainWindow(QMainWindow):
             payload=payload
         )
         # 2. Native OS System Notification (Windows 10/11 Action Center)
-        show_windows_toast(title, message, on_click=self._bring_to_front)
-        if self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
+        is_windows = sys.platform.startswith("win")
+        if is_windows:
+            show_windows_toast(title, message, on_click=self._bring_to_front)
+        elif self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
             self.tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4500)
         # 3. Audio chime
         if hasattr(self, "audio_manager") and self.audio_manager:
@@ -364,6 +366,8 @@ class MainWindow(QMainWindow):
         self.channel_list.text_channel_selected.connect(self._on_text_channel_selected)
         self.channel_list.voice_channel_selected.connect(self._on_voice_channel_selected)
         self.channel_list.create_channel_requested.connect(self._on_create_channel_prompt)
+        self.channel_list.rename_channel_requested.connect(self._on_rename_channel)
+        self.channel_list.delete_channel_requested.connect(self._on_delete_channel)
         self.channel_list.delete_room_requested.connect(self._on_delete_room)
         self.channel_list.leave_room_requested.connect(self._on_leave_room)
         self.channel_list.invite_room_requested.connect(self._on_create_room_invite)
@@ -403,6 +407,7 @@ class MainWindow(QMainWindow):
         # Voice View & Member List peer volume / mute
         self.voice_view.disconnect_clicked.connect(self._on_disconnect_voice)
         self.voice_view.screen_share_toggled.connect(self._on_screen_share_toggled)
+        self.voice_view.toggle_chat_requested.connect(self._on_toggle_voice_chat)
         self.voice_view.popout_stream_requested.connect(self._on_popout_stream)
         self.voice_view.stream_volume_changed.connect(self._on_stream_volume_changed)
         self.voice_view.peer_volume_changed.connect(self.audio_manager.set_peer_volume)
@@ -430,6 +435,7 @@ class MainWindow(QMainWindow):
         self.tcp_client.signals.room_created.connect(self._on_room_created)
         self.tcp_client.signals.room_deleted.connect(self._on_room_deleted)
         self.tcp_client.signals.channel_created.connect(self._on_channel_created)
+        self.tcp_client.signals.channel_renamed.connect(self._on_channel_renamed)
         self.tcp_client.signals.channel_deleted.connect(self._on_channel_deleted)
         self.tcp_client.signals.voice_state_update.connect(self._on_voice_state_update)
         self.tcp_client.signals.chat_message.connect(self._on_chat_message_received)
@@ -608,6 +614,10 @@ class MainWindow(QMainWindow):
         self.tcp_client.send_get_history("channel", channel_id)
 
     def _on_voice_channel_selected(self, room_id: str, channel_id: str, name: str):
+        if self.current_voice_channel_id == channel_id:
+            self.main_stack.setCurrentIndex(2)
+            return
+
         if self.active_call_id:
             self._on_end_active_call()
 
@@ -922,7 +932,7 @@ class MainWindow(QMainWindow):
         self.call_banner.start(peer_name, peer_id=peer_id)
         self.voice_bar.set_channel("Direct Call", peer_name)
         self.voice_bar.show()
-        self.main_stack.setCurrentIndex(1)
+        self.main_stack.setCurrentIndex(2)
 
         peer_color = "#5865F2"
         if peer_id in self.users:
@@ -934,13 +944,22 @@ class MainWindow(QMainWindow):
             {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
         ])
 
+    def _on_toggle_voice_chat(self):
+        if self.main_stack.currentIndex() == 2:
+            if self.current_room_id or self.current_dm_peer_id:
+                self.main_stack.setCurrentIndex(1)
+            else:
+                self.main_stack.setCurrentIndex(0)
+        else:
+            self.main_stack.setCurrentIndex(2)
+
     def _on_call_volume_changed(self, vol: float):
         if getattr(self.call_banner, "peer_id", None):
             self.audio_manager.set_peer_volume(self.call_banner.peer_id, vol)
 
     def _on_call_declined(self, call_id: str):
         self.audio_manager.stop_ringtone()
-        QMessageBox.information(self, "Call Declined", "Call was declined.")
+        QMessageBox.information(self, t("call_declined"), t("call_was_declined"))
 
     def _on_call_ended(self, call_id: str):
         self.audio_manager.stop_ringtone()
@@ -958,7 +977,11 @@ class MainWindow(QMainWindow):
 
     def _on_call_failed(self, reason: str):
         self.audio_manager.stop_ringtone()
-        QMessageBox.warning(self, "Call Failed", reason)
+        if "busy" in reason.lower() or "unavailable" in reason.lower():
+            msg = t("user_busy")
+        else:
+            msg = reason
+        QMessageBox.warning(self, t("call_failed"), msg)
 
     def _on_end_active_call(self):
         if self.active_call_id:
@@ -1101,6 +1124,26 @@ class MainWindow(QMainWindow):
             self.connection_overlay.title_lbl.setText(t("connection_lost"))
             self.connection_overlay.desc_lbl.setText(t("disconnected_from_server"))
             self.connection_overlay.reconnect_btn.setText(f"🔄 {t('reconnect_now')}")
+        if hasattr(self, "channel_list"):
+            if self.current_room_id and self.current_room_id in self.rooms:
+                self.channel_list.show_room_mode(self.rooms[self.current_room_id])
+            else:
+                self.channel_list.show_dm_mode()
+        if hasattr(self, "chat_view"):
+            if hasattr(self.chat_view, "msg_input"):
+                self.chat_view.msg_input.setPlaceholderText(t("send_message"))
+            if hasattr(self.chat_view, "members_btn"):
+                self.chat_view.members_btn.setToolTip(t("members"))
+        if hasattr(self, "user_panel") and hasattr(self.user_panel, "retranslate_ui"):
+            self.user_panel.retranslate_ui()
+        if hasattr(self, "voice_bar") and hasattr(self.voice_bar, "retranslate_ui"):
+            self.voice_bar.retranslate_ui()
+        if hasattr(self, "friends_view") and hasattr(self.friends_view, "retranslate_ui"):
+            self.friends_view.retranslate_ui()
+        if hasattr(self, "voice_view") and hasattr(self.voice_view, "retranslate_ui"):
+            self.voice_view.retranslate_ui()
+        if hasattr(self, "member_list") and hasattr(self.member_list, "retranslate_ui"):
+            self.member_list.retranslate_ui()
 
     def _apply_saved_theme(self):
         try:
@@ -1303,6 +1346,28 @@ class MainWindow(QMainWindow):
             if self.current_room_id == room_id:
                 self.channel_list.show_room_mode(self.rooms[room_id])
 
+    def _on_rename_channel(self, room_id: str, channel_id: str, new_name: str):
+        self.tcp_client.send_rename_channel(room_id, channel_id, new_name)
+
+    def _on_delete_channel(self, room_id: str, channel_id: str):
+        self.tcp_client.send_delete_channel(room_id, channel_id)
+
+    def _on_channel_renamed(self, room_id: str, channel_id: str, new_name: str):
+        if room_id in self.rooms:
+            for c in self.rooms[room_id].get("channels", []):
+                if c.get("channel_id") == channel_id:
+                    c["name"] = new_name
+                    break
+            if self.current_room_id == room_id:
+                self.channel_list.show_room_mode(self.rooms[room_id])
+                if self.current_text_channel_id == channel_id:
+                    self.chat_view.set_target(
+                        channel_id,
+                        new_name,
+                        is_channel=True,
+                        room_name=self.rooms[room_id].get("name", "VimCord")
+                    )
+
     def _on_channel_deleted(self, room_id: str, channel_id: str):
         if room_id in self.rooms:
             self.rooms[room_id]["channels"] = [
@@ -1310,6 +1375,14 @@ class MainWindow(QMainWindow):
             ]
             if self.current_room_id == room_id:
                 self.channel_list.show_room_mode(self.rooms[room_id])
+                if self.current_text_channel_id == channel_id:
+                    txt_chans = [c for c in self.rooms[room_id]["channels"] if c.get("channel_type") == "text"]
+                    if txt_chans:
+                        self._on_text_channel_selected(room_id, txt_chans[0]["channel_id"], txt_chans[0]["name"])
+                    else:
+                        self.current_text_channel_id = None
+                if self.current_voice_channel_id == channel_id:
+                    self._on_disconnect_voice()
 
     def _on_voice_state_update(self, update: Dict[str, Any]):
         r_id = update.get("room_id")
@@ -1347,6 +1420,11 @@ class MainWindow(QMainWindow):
                 self.channel_list.show_room_mode(self.rooms[r_id])
             if self.current_voice_channel_id:
                 self._refresh_voice_stage_users()
+
+        # Play leave chime if another user leaves our current voice channel
+        if action == "leave" and u_id != self.my_user_id and self.current_voice_channel_id == ch_id:
+            if hasattr(self, "audio_manager") and self.audio_manager:
+                self.audio_manager.play_leave_chime()
 
         # If we were disconnected/left
         if u_id == self.my_user_id and action == "leave" and self.current_voice_channel_id == ch_id:

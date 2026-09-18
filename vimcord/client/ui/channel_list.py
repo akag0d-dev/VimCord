@@ -9,12 +9,15 @@ from PyQt6.QtWidgets import (
     QScrollArea, QFrame, QMessageBox
 )
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.i18n import t
 
 
 class ChannelListWidget(QWidget):
     text_channel_selected = pyqtSignal(str, str, str)   # room_id, channel_id, name
     voice_channel_selected = pyqtSignal(str, str, str)  # room_id, channel_id, name
     create_channel_requested = pyqtSignal(str)          # room_id
+    rename_channel_requested = pyqtSignal(str, str, str) # room_id, channel_id, new_name
+    delete_channel_requested = pyqtSignal(str, str)      # room_id, channel_id
     delete_room_requested = pyqtSignal(str)             # room_id
     leave_room_requested = pyqtSignal(str)              # room_id
     invite_room_requested = pyqtSignal(str)             # room_id
@@ -181,7 +184,7 @@ class ChannelListWidget(QWidget):
         self._clear_content()
 
         # Friends Nav Button
-        friends_btn = QPushButton("👥  Friends")
+        friends_btn = QPushButton(f"👥  {t('friends')}")
         friends_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #ffffff; font-weight: bold;
@@ -193,14 +196,14 @@ class ChannelListWidget(QWidget):
         self.content_layout.addWidget(friends_btn)
 
         # Section Header
-        sec_label = QLabel("DIRECT MESSAGES")
+        sec_label = QLabel(t("direct_messages"))
         sec_label.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 14px 8px 4px 8px;")
         self.content_layout.addWidget(sec_label)
 
         # Privacy filter: ONLY show confirmed friends in DMs
         confirmed_friends = [f for f in self.friends_list if f.get("friendship_status") == "accepted"]
         if not confirmed_friends:
-            empty_lbl = QLabel("No friends yet\nGo to the 'Friends' tab to add friends 👥")
+            empty_lbl = QLabel(t("no_friends_yet"))
             empty_lbl.setWordWrap(True)
             empty_lbl.setStyleSheet("color: #80848e; font-size: 12px; padding: 10px 8px; line-height: 1.4;")
             self.content_layout.addWidget(empty_lbl)
@@ -290,7 +293,7 @@ class ChannelListWidget(QWidget):
         voice_channels = [c for c in channels if c.get("channel_type") == "voice"]
 
         # Text channels section
-        lbl_text = QLabel("TEXT CHANNELS")
+        lbl_text = QLabel(t("text_channels"))
         lbl_text.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 6px 8px;")
         self.content_layout.addWidget(lbl_text)
 
@@ -308,11 +311,13 @@ class ChannelListWidget(QWidget):
                 }}
                 QPushButton:hover {{ background-color: #35373c; color: #dbdee1; }}
             """)
+            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda pos, r_id=self.current_mode, ch_id=cid, ch_nm=cname, b=btn: self._show_channel_context_menu(r_id, ch_id, ch_nm, b.mapToGlobal(pos)))
             btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=cname: self._on_text_ch_clicked(r_id, ch_id, ch_nm))
             self.content_layout.addWidget(btn)
 
         # Voice channels section
-        lbl_voice = QLabel("VOICE CHANNELS")
+        lbl_voice = QLabel(t("voice_channels"))
         lbl_voice.setStyleSheet("color: #949ba4; font-size: 11px; font-weight: bold; padding: 12px 8px 6px 8px;")
         self.content_layout.addWidget(lbl_voice)
 
@@ -335,6 +340,8 @@ class ChannelListWidget(QWidget):
                 }}
                 QPushButton:hover {{ background-color: #35373c; color: #dbdee1; }}
             """)
+            v_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            v_btn.customContextMenuRequested.connect(lambda pos, r_id=self.current_mode, ch_id=cid, ch_nm=clean_name, b=v_btn: self._show_channel_context_menu(r_id, ch_id, ch_nm, b.mapToGlobal(pos)))
             v_btn.clicked.connect(lambda checked, r_id=self.current_mode, ch_id=cid, ch_nm=clean_name: self._on_voice_ch_clicked(r_id, ch_id, ch_nm))
             self.content_layout.addWidget(v_btn)
 
@@ -415,3 +422,45 @@ class ChannelListWidget(QWidget):
             )
             if ret == QMessageBox.StandardButton.Yes:
                 self.delete_room_requested.emit(self.current_mode)
+
+    def _show_channel_context_menu(self, room_id: str, channel_id: str, channel_name: str, global_pos):
+        from PyQt6.QtWidgets import QMenu, QInputDialog, QMessageBox
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #111214;
+                color: #dbdee1;
+                border: 1px solid #232428;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px 6px 10px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #5865F2;
+                color: #ffffff;
+            }
+        """)
+        rename_act = menu.addAction(f"✏️ {t('rename_channel')}")
+        del_act = menu.addAction(f"🗑️ {t('delete_channel')}")
+
+        def _do_rename():
+            new_name, ok = QInputDialog.getText(
+                self, t("rename_channel"), t("enter_channel_name"), text=channel_name
+            )
+            if ok and new_name.strip():
+                self.rename_channel_requested.emit(room_id, channel_id, new_name.strip())
+
+        def _do_delete():
+            res = QMessageBox.question(
+                self, t("delete_channel"), t("confirm_delete_channel").format(name=channel_name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if res == QMessageBox.StandardButton.Yes:
+                self.delete_channel_requested.emit(room_id, channel_id)
+
+        rename_act.triggered.connect(_do_rename)
+        del_act.triggered.connect(_do_delete)
+        menu.exec(global_pos)

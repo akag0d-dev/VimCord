@@ -215,6 +215,14 @@ class ServerState:
         self.db.delete_channel(channel_id)
         return True
 
+    def rename_channel(self, room_id: str, channel_id: str, new_name: str) -> bool:
+        room = self.rooms.get(room_id)
+        if not room or channel_id not in room.channels:
+            return False
+        room.channels[channel_id].name = new_name
+        self.db.rename_channel(channel_id, new_name)
+        return True
+
     def join_voice(self, user_id: str, room_id: str, channel_id: str) -> Tuple[bool, Optional[Tuple[str, str]]]:
         user = self.users.get(user_id)
         room = self.rooms.get(room_id)

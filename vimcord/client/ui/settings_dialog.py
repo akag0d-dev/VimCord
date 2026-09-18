@@ -702,22 +702,36 @@ class SettingsDialog(QDialog):
         sep_sc.setStyleSheet("background-color: #35373c; margin: 10px 0;")
         layout.addWidget(sep_sc)
 
-        layout.addWidget(QLabel("SCREEN SHARE QUALITY:"))
+        cfg = load_config()
+        saved_res = cfg.get("stream_resolution", "720p")
+        saved_fps = str(cfg.get("stream_fps", 15))
+        saved_q = int(cfg.get("stream_quality", 45))
+
+        layout.addWidget(QLabel("SCREEN SHARE QUALITY & PERFORMANCE:"))
         sc_row = QHBoxLayout()
         sc_row.addWidget(QLabel("Resolution:"))
         self.sc_res_combo = QComboBox()
         self.sc_res_combo.addItems(["360p", "480p", "720p", "1080p"])
-        self.sc_res_combo.setCurrentText("720p")
+        self.sc_res_combo.setCurrentText(saved_res)
         sc_row.addWidget(self.sc_res_combo)
 
         sc_row.addWidget(QLabel("FPS:"))
         self.sc_fps_combo = QComboBox()
-        self.sc_fps_combo.addItems(["10", "15", "20", "30"])
-        self.sc_fps_combo.setCurrentText("15")
+        self.sc_fps_combo.addItems(["10", "15", "20", "30", "60"])
+        self.sc_fps_combo.setCurrentText(saved_fps)
         sc_row.addWidget(self.sc_fps_combo)
 
         sc_row.addStretch(1)
         layout.addLayout(sc_row)
+
+        self.sc_q_lbl = QLabel(f"Stream Compression Quality: {saved_q}%")
+        layout.addWidget(self.sc_q_lbl)
+
+        self.sc_q_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sc_q_slider.setRange(20, 85)
+        self.sc_q_slider.setValue(saved_q)
+        self.sc_q_slider.valueChanged.connect(self._on_screen_settings_changed)
+        layout.addWidget(self.sc_q_slider)
 
         self.sc_res_combo.currentTextChanged.connect(self._on_screen_settings_changed)
         self.sc_fps_combo.currentTextChanged.connect(self._on_screen_settings_changed)
@@ -784,7 +798,18 @@ class SettingsDialog(QDialog):
     def _on_screen_settings_changed(self):
         res = self.sc_res_combo.currentText()
         fps = int(self.sc_fps_combo.currentText() or 15)
-        self.screen_settings_changed.emit(res, fps, 45)
+        q = self.sc_q_slider.value() if hasattr(self, "sc_q_slider") else 45
+        if hasattr(self, "sc_q_lbl"):
+            self.sc_q_lbl.setText(f"Stream Compression Quality: {q}%")
+        self.screen_settings_changed.emit(res, fps, q)
+        try:
+            cfg = load_config()
+            cfg["stream_resolution"] = res
+            cfg["stream_fps"] = fps
+            cfg["stream_quality"] = q
+            save_config(cfg)
+        except Exception:
+            pass
 
     def _load_audio_devices(self):
         in_devs = self.audio_manager.get_input_devices()

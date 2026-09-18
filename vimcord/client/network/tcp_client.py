@@ -31,6 +31,7 @@ class TCPClientSignals(QObject):
     room_deleted = pyqtSignal(str)                # room_id
     channel_created = pyqtSignal(str, dict)       # room_id, channel_dict
     channel_deleted = pyqtSignal(str, str)        # room_id, channel_id
+    channel_renamed = pyqtSignal(str, str, str)   # room_id, channel_id, new_name
     voice_state_update = pyqtSignal(dict)         # dict with user_id, room_id, channel_id, action
 
     # Chat & history
@@ -150,6 +151,14 @@ class TCPClient:
             "type": "delete_channel",
             "room_id": room_id,
             "channel_id": channel_id
+        })
+
+    def send_rename_channel(self, room_id: str, channel_id: str, new_name: str):
+        self.send_message({
+            "type": "rename_channel",
+            "room_id": room_id,
+            "channel_id": channel_id,
+            "name": new_name
         })
 
     def send_create_room_invite(self, room_id: str):
@@ -313,6 +322,9 @@ class TCPClient:
 
         elif mtype == "channel_deleted":
             self.signals.channel_deleted.emit(msg.get("room_id", ""), msg.get("channel_id", ""))
+
+        elif mtype == "channel_renamed":
+            self.signals.channel_renamed.emit(msg.get("room_id", ""), msg.get("channel_id", ""), msg.get("name", ""))
 
         elif mtype == "voice_state_update":
             self.signals.voice_state_update.emit(msg)

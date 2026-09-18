@@ -563,10 +563,18 @@ class Database:
             )
             conn.commit()
 
+    def rename_channel(self, channel_id: str, new_name: str) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE channels SET name = ? WHERE channel_id = ?", (new_name, channel_id))
+            conn.commit()
+            return cur.rowcount > 0
+
     def delete_channel(self, channel_id: str):
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
+            cur.execute("DELETE FROM messages WHERE target_id = ?", (channel_id,))
             conn.commit()
 
     def create_invite(self, room_id: str, created_by: str) -> str:

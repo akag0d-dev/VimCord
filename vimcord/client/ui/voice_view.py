@@ -14,13 +14,14 @@ from PyQt6.QtWidgets import (
 
 
 from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.i18n import t
 
 
 class VoiceUserWidget(QWidget):
     clicked = pyqtSignal(dict)
     right_clicked = pyqtSignal(dict, object)
 
-    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, display_name: str = "", parent=None):
+    def __init__(self, username: str, user_id: str, avatar_color: str = "#5865F2", avatar_image: str = "", is_muted: bool = False, is_deafened: bool = False, is_locally_muted: bool = False, display_name: str = "", parent=None):
         super().__init__(parent)
         self.username = username
         self.display_name = display_name or username
@@ -29,6 +30,7 @@ class VoiceUserWidget(QWidget):
         self.avatar_image = avatar_image
         self.is_muted = is_muted
         self.is_deafened = is_deafened
+        self.is_locally_muted = is_locally_muted
         self.is_speaking = False
 
         self.setFixedSize(110, 120)
@@ -67,11 +69,17 @@ class VoiceUserWidget(QWidget):
         layout.addLayout(name_row)
 
     def _update_badge(self):
-        if self.is_deafened:
+        if self.is_locally_muted:
+            self.badge_label.setText("🔇")
+            self.badge_label.setToolTip("Locally Muted")
+            self.badge_label.show()
+        elif self.is_deafened:
             self.badge_label.setText("🎧")
+            self.badge_label.setToolTip("Deafened")
             self.badge_label.show()
         elif self.is_muted:
             self.badge_label.setText("🔇")
+            self.badge_label.setToolTip("Muted")
             self.badge_label.show()
         else:
             self.badge_label.setText("")
@@ -102,9 +110,10 @@ class VoiceUserWidget(QWidget):
             self.is_speaking = speaking
             self._set_avatar_style(speaking)
 
-    def set_media_state(self, is_muted: bool, is_deafened: bool):
+    def set_media_state(self, is_muted: bool, is_deafened: bool, is_locally_muted: bool = False):
         self.is_muted = is_muted
         self.is_deafened = is_deafened
+        self.is_locally_muted = is_locally_muted
         self._update_badge()
 
     def mousePressEvent(self, event):
@@ -141,6 +150,7 @@ class VoiceView(QWidget):
     popout_stream_requested = pyqtSignal()
     stream_volume_changed = pyqtSignal(float)
     watch_stream_toggled = pyqtSignal(bool)
+    toggle_chat_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -185,9 +195,22 @@ class VoiceView(QWidget):
 
         sb_layout.addStretch(1)
 
+        # Chat toggle button
+        self.chat_btn = QPushButton(f"💬 {t('chat')}")
+        self.chat_btn.setToolTip("Return to text chat")
+        self.chat_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #35373c; color: #dbdee1; font-weight: bold;
+                border-radius: 4px; padding: 6px 12px; border: none; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #404249; color: #ffffff; }
+        """)
+        self.chat_btn.clicked.connect(self.toggle_chat_requested.emit)
+        sb_layout.addWidget(self.chat_btn)
+
         # Screen Share toggle button
-        self.screen_btn = QPushButton("🖥️ Screen")
-        self.screen_btn.setToolTip("Share Screen")
+        self.screen_btn = QPushButton(f"🖥️ {t('screen_share')}")
+        self.screen_btn.setToolTip(t("screen_share"))
         self.screen_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #dbdee1; font-weight: bold;
@@ -199,7 +222,7 @@ class VoiceView(QWidget):
         sb_layout.addWidget(self.screen_btn)
 
         # Disconnect button
-        self.disc_btn = QPushButton("Disconnect")
+        self.disc_btn = QPushButton(t("disconnect"))
         self.disc_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f23f43; color: #ffffff; font-weight: bold;
@@ -224,7 +247,7 @@ class VoiceView(QWidget):
         stream_ctrl_bar.setContentsMargins(0, 0, 0, 0)
         stream_ctrl_bar.setSpacing(8)
 
-        self.screen_title = QLabel("🖥️ Screen Share")
+        self.screen_title = QLabel(f"🖥️ {t('screen_share')}")
         self.screen_title.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: bold;")
         stream_ctrl_bar.addWidget(self.screen_title)
 
@@ -252,7 +275,7 @@ class VoiceView(QWidget):
         stream_ctrl_bar.addWidget(self.stream_vol_lbl)
 
         # Watch / Hide Stream button
-        self.toggle_watch_btn = QPushButton("🙈 Hide Stream")
+        self.toggle_watch_btn = QPushButton(f"🙈 {t('hide_stream')}")
         self.toggle_watch_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #dbdee1; font-size: 11px;
@@ -264,8 +287,8 @@ class VoiceView(QWidget):
         stream_ctrl_bar.addWidget(self.toggle_watch_btn)
 
         # Pop-out button (↗️)
-        self.popout_stream_btn = QPushButton("↗️ Pop-out")
-        self.popout_stream_btn.setToolTip("Open stream in separate window")
+        self.popout_stream_btn = QPushButton(f"↗️ {t('popout_window')}")
+        self.popout_stream_btn.setToolTip(t("popout_window"))
         self.popout_stream_btn.setStyleSheet("""
             QPushButton {
                 background-color: #35373c; color: #dbdee1; font-size: 11px;
@@ -302,6 +325,27 @@ class VoiceView(QWidget):
         self.current_channel_name = channel_name
         self.title_label.setText(f"Connected: {channel_name}")
 
+    def retranslate_ui(self):
+        if hasattr(self, "chat_btn"):
+            self.chat_btn.setText(f"💬 {t('chat')}")
+        if hasattr(self, "screen_btn"):
+            if self.is_sharing:
+                self.screen_btn.setText(f"🛑 {t('stop_screen')}")
+            else:
+                self.screen_btn.setText(f"🖥️ {t('screen_share')}")
+        if hasattr(self, "disc_btn"):
+            self.disc_btn.setText(t("disconnect"))
+        if hasattr(self, "screen_title"):
+            self.screen_title.setText(f"🖥️ {t('screen_share')}")
+        if hasattr(self, "toggle_watch_btn"):
+            if self.is_watching:
+                self.toggle_watch_btn.setText(f"🙈 {t('hide_stream')}")
+            else:
+                self.toggle_watch_btn.setText(f"👀 {t('watch_stream')}")
+        if hasattr(self, "popout_stream_btn"):
+            self.popout_stream_btn.setText(f"↗️ {t('popout_window')}")
+            self.popout_stream_btn.setToolTip(t("popout_window"))
+
     def update_connection_info(self, ping_ms: int = 0, server_ip: str = "127.0.0.1", port: Optional[int] = None, *args, **kwargs):
         pass
 
@@ -327,6 +371,7 @@ class VoiceView(QWidget):
                 avatar_image=avatar_img,
                 is_muted=is_muted,
                 is_deafened=is_deaf,
+                is_locally_muted=(uid in self.peer_muted),
                 display_name=dname
             )
             w.clicked.connect(self.user_profile_requested.emit)
@@ -435,9 +480,15 @@ class VoiceView(QWidget):
         if user_id in self.peer_muted:
             self.peer_muted.discard(user_id)
             self.peer_mute_toggled.emit(user_id, False)
+            if user_id in self.user_widgets:
+                w = self.user_widgets[user_id]
+                w.set_media_state(w.is_muted, w.is_deafened, is_locally_muted=False)
         else:
             self.peer_muted.add(user_id)
             self.peer_mute_toggled.emit(user_id, True)
+            if user_id in self.user_widgets:
+                w = self.user_widgets[user_id]
+                w.set_media_state(w.is_muted, w.is_deafened, is_locally_muted=True)
 
     def _set_peer_volume(self, user_id: str, volume: float):
         self.peer_volumes[user_id] = volume
@@ -445,7 +496,9 @@ class VoiceView(QWidget):
 
     def set_user_media_state(self, user_id: str, is_muted: bool, is_deafened: bool):
         if user_id in self.user_widgets:
-            self.user_widgets[user_id].set_media_state(is_muted, is_deafened)
+            self.user_widgets[user_id].set_media_state(
+                is_muted, is_deafened, is_locally_muted=(user_id in self.peer_muted)
+            )
 
     def set_user_speaking(self, user_id: str, is_speaking: bool):
         if user_id in self.user_widgets:

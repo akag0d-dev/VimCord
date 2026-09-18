@@ -51,6 +51,16 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "record_keybind": "Record Keybind",
         "press_any_key": "Press any key...",
         "downloaded_to": "Downloaded to Downloads folder: {filename}",
+        "user_busy": "User is busy or unavailable",
+        "call_failed": "Call Failed",
+        "call_declined": "Call Declined",
+        "call_was_declined": "Call was declined.",
+        "rename_channel": "Rename Channel",
+        "delete_channel": "Delete Channel",
+        "enter_channel_name": "Enter new channel name:",
+        "confirm_delete_channel": "Are you sure you want to delete channel #{name}?",
+        "chat": "Chat",
+        "no_friends_yet": "No friends yet\nGo to the 'Friends' tab to add friends 👥",
     },
     "ru": {
         "app_title": "VimCord",
@@ -97,6 +107,16 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "record_keybind": "Задать кнопку",
         "press_any_key": "Нажмите любую клавишу...",
         "downloaded_to": "Файл сохранен в Загрузки: {filename}",
+        "user_busy": "Пользователь занят или недоступен",
+        "call_failed": "Не удалось позвонить",
+        "call_declined": "Звонок отклонен",
+        "call_was_declined": "Звонок был отклонен.",
+        "rename_channel": "Переименовать канал",
+        "delete_channel": "Удалить канал",
+        "enter_channel_name": "Введите новое имя канала:",
+        "confirm_delete_channel": "Вы уверены, что хотите удалить канал #{name}?",
+        "chat": "Чат",
+        "no_friends_yet": "Пока нет друзей\nПерейдите во вкладку 'Друзья' чтобы добавить друзей 👥",
     }
 }
 

@@ -305,13 +305,17 @@ class ChatView(QWidget):
 
     def _render_history(self):
         self.browser.clear()
-        prefix = "#" if self.is_channel else "@"
-        type_str = "channel" if self.is_channel else "direct message"
+        if self.is_channel:
+            welcome_title = f"Welcome to #{self.target_name}!"
+            welcome_sub = f"This is the start of the #{self.target_name} channel."
+        else:
+            welcome_title = f"Welcome to @{self.target_name}!"
+            welcome_sub = f"This is the start of your direct message history with @{self.target_name}."
 
         welcome_html = f"""
         <div style='margin-bottom: 24px; color: #949ba4;'>
-            <h2 style='color: #ffffff; margin-bottom: 6px; font-size: 20px;'>Welcome to {prefix}{self.target_name}!</h2>
-            <div style='font-size: 13px;'>This is the start of the {type_str} history for <b>{self.target_name}</b>.</div>
+            <h2 style='color: #ffffff; margin-bottom: 6px; font-size: 20px;'>{welcome_title}</h2>
+            <div style='font-size: 13px;'>{welcome_sub}</div>
         </div>
         <hr style='border: 0; border-top: 1px solid #35373c; margin-bottom: 16px;'/>
         """
@@ -365,8 +369,8 @@ class ChatView(QWidget):
         av_url = QUrl(f"res://avatar/{av_key}.png")
         self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, av_url, av_pixmap.toImage())
         if sender_id:
-            avatar_html = f"<a href='user_profile:{sender_id}' style='text-decoration: none;' title='View Profile'><img src='res://avatar/{av_key}.png' width='36' height='36' /></a>"
-            sender_html = f"<a href='user_profile:{sender_id}' style='color: #5865F2; font-weight: bold; font-size: 14px; text-decoration: none;' title='View Profile'>{sender_display}</a>"
+            avatar_html = f"<a href='vimcord://user_profile/{sender_id}' style='text-decoration: none;' title='View Profile'><img src='res://avatar/{av_key}.png' width='36' height='36' /></a>"
+            sender_html = f"<a href='vimcord://user_profile/{sender_id}' style='color: #5865F2; font-weight: bold; font-size: 14px; text-decoration: none;' title='View Profile'>{sender_display}</a>"
         else:
             avatar_html = f"<img src='res://avatar/{av_key}.png' width='36' height='36' />"
             sender_html = f"<span style='color: #5865F2; font-weight: bold; font-size: 14px;'>{sender_display}</span>"
@@ -375,7 +379,7 @@ class ChatView(QWidget):
         delete_html = ""
         if sender_id and self.current_user_id and sender_id == self.current_user_id and msg_id:
             delete_html = f"""
-            <a href='delete:{msg_id}' style='color: #ed4245; text-decoration: none; font-size: 12px; margin-left: 10px;' title='Delete message'>🗑️</a>
+            <a href='vimcord://delete/{msg_id}' style='color: #ed4245; text-decoration: none; font-size: 12px; margin-left: 10px;' title='Delete message'>🗑️</a>
             """
 
         # 3. Attachment Image registered as Qt Document Image Resource
@@ -396,11 +400,11 @@ class ChatView(QWidget):
                     self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, img_url, qimg)
                     image_html = f"""
                     <div style='margin-top: 6px;'>
-                        <a href='view_image:{msg_id}' style='text-decoration: none;' title='Click to view full size'>
+                        <a href='vimcord://view_image/{msg_id}' style='text-decoration: none;' title='Click to view full size'>
                             <img src='res://img/{img_key}.jpg' width='{qimg.width()}' height='{qimg.height()}' style='border-radius: 6px;' />
                         </a>
                         <div style='margin-top: 4px;'>
-                            <a href='save_image:{msg_id}' style='color: #00a8fc; text-decoration: none; font-size: 11px; font-weight: bold;' title='Save to Downloads'>⬇️ Download</a>
+                            <a href='vimcord://save_image/{msg_id}' style='color: #00a8fc; text-decoration: none; font-size: 11px; font-weight: bold;' title='Save to Downloads'>⬇️ Download</a>
                         </div>
                     </div>
                     """
@@ -444,7 +448,7 @@ class ChatView(QWidget):
                             <div style='color: #949ba4; font-size: 11px; margin-top: 2px;'>{size_str}</div>
                         </td>
                         <td style='text-align: right; vertical-align: middle; width: 64px;'>
-                            <a href='save_file:{msg_id}' style='background-color: #383a40; color: #ffffff; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;' title='Save directly to Downloads'>Save</a>
+                            <a href='vimcord://save_file/{msg_id}' style='background-color: #383a40; color: #ffffff; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;' title='Save directly to Downloads'>Save</a>
                         </td>
                     </tr>
                 </table>
@@ -457,7 +461,7 @@ class ChatView(QWidget):
             dur_text = f"{voice_duration:.1f}s" if voice_duration > 0 else "voice"
             voice_html = f"""
             <div style='margin-top: 6px; padding: 4px 0;'>
-                <a href='play_voice:{msg_id}' style='color: #5865F2; text-decoration: none; font-weight: bold; font-size: 13px;'>
+                <a href='vimcord://play_voice/{msg_id}' style='color: #5865F2; text-decoration: none; font-weight: bold; font-size: 13px;'>
                     ▶️ Play voice ({dur_text})
                 </a>
             </div>
@@ -497,113 +501,137 @@ class ChatView(QWidget):
             copy_act = menu.addAction("Copy")
             copy_act.triggered.connect(self.browser.copy)
 
-        if anchor.startswith("delete:"):
-            msg_id = anchor.removeprefix("delete:")
+    def _parse_anchor(self, item) -> tuple[str, str]:
+        if isinstance(item, QUrl):
+            if item.scheme() == "vimcord":
+                return item.host(), item.path().lstrip("/")
+            url_str = item.toString()
+        else:
+            url_str = str(item)
+        
+        if url_str.startswith("vimcord://"):
+            parts = url_str.removeprefix("vimcord://").split("/", 1)
+            return parts[0], parts[1] if len(parts) > 1 else ""
+        if ":" in url_str:
+            parts = url_str.split(":", 1)
+            return parts[0], parts[1]
+        return "", ""
+
+    def _trigger_download_file(self, msg_id: str):
+        messages = self.message_cache.get(self.current_target_id, [])
+        msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+        if not msg or not msg.get("file_data"):
+            return
+        raw_b64 = msg["file_data"]
+        fname = msg.get("file_name") or "download"
+        dl_dir = Path.home() / "Downloads"
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        target_path = dl_dir / fname
+        counter = 1
+        base, ext = os.path.splitext(fname)
+        while target_path.exists():
+            target_path = dl_dir / f"{base}_{counter}{ext}"
+            counter += 1
+        try:
+            clean_b64 = raw_b64
+            if "," in clean_b64:
+                clean_b64 = clean_b64.split(",", 1)[1]
+            data = base64.b64decode(clean_b64)
+            with open(target_path, "wb") as f:
+                f.write(data)
+            QMessageBox.information(self, "Downloaded", f"File saved to Downloads folder:\n{target_path.name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Download Error", f"Failed to save file: {e}")
+
+    def _trigger_download_image(self, msg_id: str):
+        messages = self.message_cache.get(self.current_target_id, [])
+        msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+        if not msg or not msg.get("image_data"):
+            return
+        raw_b64 = msg["image_data"]
+        fname = f"image_{msg_id[:8]}.png"
+        dl_dir = Path.home() / "Downloads"
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        target_path = dl_dir / fname
+        counter = 1
+        while target_path.exists():
+            target_path = dl_dir / f"image_{msg_id[:8]}_{counter}.png"
+            counter += 1
+        try:
+            clean_b64 = raw_b64
+            if "," in clean_b64:
+                clean_b64 = clean_b64.split(",", 1)[1]
+            data = base64.b64decode(clean_b64)
+            with open(target_path, "wb") as f:
+                f.write(data)
+            QMessageBox.information(self, "Downloaded", f"Image saved to Downloads folder:\n{target_path.name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Download Error", f"Failed to save image: {e}")
+
+    def _trigger_view_image(self, msg_id: str):
+        messages = self.message_cache.get(self.current_target_id, [])
+        msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+        if msg and msg.get("image_data"):
+            try:
+                from vimcord.client.ui.image_viewer import ImageViewerModal
+                dlg = ImageViewerModal(msg["image_data"], self)
+                dlg.exec()
+            except Exception:
+                pass
+
+    def _on_browser_context_menu(self, pos):
+        menu = QMenu(self)
+        anchor = self.browser.anchorAt(pos)
+        selected = self.browser.textCursor().selectedText()
+        if selected:
+            copy_act = menu.addAction("Copy")
+            copy_act.triggered.connect(self.browser.copy)
+
+        action, target = self._parse_anchor(anchor)
+        if action == "delete":
             del_act = menu.addAction("🗑️ Delete Message")
-            del_act.triggered.connect(lambda: self.delete_message_requested.emit(msg_id, "channel" if self.is_channel else "dm", self.current_target_id))
-        elif anchor.startswith("user_profile:"):
-            uid = anchor.removeprefix("user_profile:")
+            del_act.triggered.connect(lambda: self.delete_message_requested.emit(target, "channel" if self.is_channel else "dm", self.current_target_id))
+        elif action == "user_profile":
             p_act = menu.addAction("👤 View Profile")
-            p_act.triggered.connect(lambda: self.open_profile_requested.emit(uid))
-        elif anchor.startswith("save_file:"):
-            msg_id = anchor.removeprefix("save_file:")
+            p_act.triggered.connect(lambda: self.open_profile_requested.emit(target))
+        elif action == "save_file":
             dl_act = menu.addAction("⬇️ Download File")
-            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_file:{msg_id}")))
-        elif anchor.startswith("save_image:"):
-            msg_id = anchor.removeprefix("save_image:")
-            dl_act = menu.addAction("⬇️ Download Image")
-            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_image:{msg_id}")))
-        elif anchor.startswith("view_image:"):
-            msg_id = anchor.removeprefix("view_image:")
+            dl_act.triggered.connect(lambda: self._trigger_download_file(target))
+        elif action in ("save_image", "view_image"):
             view_act = menu.addAction("🔍 View Image")
-            view_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"view_image:{msg_id}")))
+            view_act.triggered.connect(lambda: self._trigger_view_image(target))
             dl_act = menu.addAction("⬇️ Download Image")
-            dl_act.triggered.connect(lambda: self._on_anchor_clicked(QUrl(f"save_image:{msg_id}")))
+            dl_act.triggered.connect(lambda: self._trigger_download_image(target))
 
         if not menu.isEmpty():
             menu.exec(self.browser.mapToGlobal(pos))
 
     def _on_anchor_clicked(self, url: QUrl):
-        url_str = url.toString()
-        if url_str.startswith("delete:"):
-            msg_id = url_str.removeprefix("delete:")
+        if url.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(url)
+            return
+
+        action, target = self._parse_anchor(url)
+        if action == "delete":
             target_type = "channel" if self.is_channel else "dm"
-            self.delete_message_requested.emit(msg_id, target_type, self.current_target_id)
-        elif url_str.startswith("user_profile:"):
-            sender_id = url_str.removeprefix("user_profile:")
-            if sender_id:
-                self.open_profile_requested.emit(sender_id)
-        elif url_str.startswith("save_file:"):
-            msg_id = url_str.removeprefix("save_file:")
+            self.delete_message_requested.emit(target, target_type, self.current_target_id)
+        elif action == "user_profile":
+            if target:
+                self.open_profile_requested.emit(target)
+        elif action == "save_file":
+            self._trigger_download_file(target)
+        elif action == "save_image":
+            self._trigger_download_image(target)
+        elif action == "view_image":
+            self._trigger_view_image(target)
+        elif action == "play_voice":
             messages = self.message_cache.get(self.current_target_id, [])
-            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
-            if msg and msg.get("file_data"):
-                raw_b64 = msg["file_data"]
-                fname = msg.get("file_name", "download")
-                dl_dir = Path.home() / "Downloads"
-                dl_dir.mkdir(parents=True, exist_ok=True)
-                target_path = dl_dir / fname
-                counter = 1
-                base, ext = os.path.splitext(fname)
-                while target_path.exists():
-                    target_path = dl_dir / f"{base}_{counter}{ext}"
-                    counter += 1
-                try:
-                    clean_b64 = raw_b64
-                    if "," in clean_b64:
-                        clean_b64 = clean_b64.split(",", 1)[1]
-                    data = base64.b64decode(clean_b64)
-                    with open(target_path, "wb") as f:
-                        f.write(data)
-                    QMessageBox.information(self, "Downloaded", f"Saved to Downloads:\n{target_path.name}")
-                except Exception as e:
-                    QMessageBox.critical(self, "Download Error", f"Failed to save file: {e}")
-        elif url_str.startswith("save_image:"):
-            msg_id = url_str.removeprefix("save_image:")
-            messages = self.message_cache.get(self.current_target_id, [])
-            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
-            if msg and msg.get("image_data"):
-                raw_b64 = msg["image_data"]
-                fname = f"image_{msg_id[:8]}.png"
-                dl_dir = Path.home() / "Downloads"
-                dl_dir.mkdir(parents=True, exist_ok=True)
-                target_path = dl_dir / fname
-                counter = 1
-                while target_path.exists():
-                    target_path = dl_dir / f"image_{msg_id[:8]}_{counter}.png"
-                    counter += 1
-                try:
-                    clean_b64 = raw_b64
-                    if "," in clean_b64:
-                        clean_b64 = clean_b64.split(",", 1)[1]
-                    data = base64.b64decode(clean_b64)
-                    with open(target_path, "wb") as f:
-                        f.write(data)
-                    QMessageBox.information(self, "Downloaded", f"Saved to Downloads:\n{target_path.name}")
-                except Exception as e:
-                    QMessageBox.critical(self, "Download Error", f"Failed to save image: {e}")
-        elif url_str.startswith("view_image:"):
-            msg_id = url_str.removeprefix("view_image:")
-            messages = self.message_cache.get(self.current_target_id, [])
-            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
-            if msg and msg.get("image_data"):
-                try:
-                    from vimcord.client.ui.image_viewer import ImageViewerModal
-                    dlg = ImageViewerModal(msg["image_data"], self)
-                    dlg.exec()
-                except Exception as e:
-                    pass
-        elif url_str.startswith("play_voice:"):
-            msg_id = url_str.removeprefix("play_voice:")
-            messages = self.message_cache.get(self.current_target_id, [])
-            msg = next((m for m in messages if m.get("msg_id") == msg_id), None)
+            msg = next((m for m in messages if m.get("msg_id") == target), None)
             if msg and msg.get("voice_data"):
                 if self.audio_manager:
                     self.audio_manager.play_voice_msg(msg["voice_data"], float(msg.get("voice_duration", 0.0)))
                 else:
                     self.play_voice_requested.emit(msg["voice_data"])
-        elif url.scheme() in ("http", "https"):
-            QDesktopServices.openUrl(url)
 
     def _on_choose_attachment(self):
         path, _ = QFileDialog.getOpenFileName(

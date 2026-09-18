@@ -79,6 +79,29 @@ class LoginDialog(QDialog):
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(subtitle)
 
+        # Server IP / Host Configuration (prominently placed at top)
+        srv_box = QWidget()
+        srv_layout = QVBoxLayout(srv_box)
+        srv_layout.setContentsMargins(0, 4, 0, 4)
+        srv_layout.setSpacing(4)
+
+        lbl_sh = QLabel("SERVER HOST / IP:")
+        lbl_sh.setStyleSheet("color: #b5bac1; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
+        srv_layout.addWidget(lbl_sh)
+
+        self.host_input = QLineEdit()
+        self.host_input.setPlaceholderText("e.g. 194.226.123.199 or 127.0.0.1")
+        self.host_input.setText(self.server_host)
+        self.host_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1e1f22; color: #ffffff; border: 1px solid #383a40;
+                border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 500;
+            }
+            QLineEdit:focus { border: 1px solid #5865F2; }
+        """)
+        srv_layout.addWidget(self.host_input)
+        main_layout.addWidget(srv_box)
+
         # Tabs for Login vs Register
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
@@ -235,26 +258,6 @@ class LoginDialog(QDialog):
 
         self.tabs.addTab(tab_reg, "Register")
         main_layout.addWidget(self.tabs, 1)
-
-        # Server Settings Row (Host only, port removed)
-        srv_box = QWidget()
-        srv_layout = QVBoxLayout(srv_box)
-        srv_layout.setContentsMargins(0, 4, 0, 0)
-        srv_layout.setSpacing(4)
-
-        lbl_sh = QLabel("SERVER ADDRESS:")
-        lbl_sh.setStyleSheet("color: #80848e; font-size: 11px; font-weight: bold;")
-        srv_layout.addWidget(lbl_sh)
-        self.host_input = QLineEdit()
-        self.host_input.setText(self.server_host)
-        self.host_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1e1f22; color: #dbdee1; border: 1px solid #383a40;
-                border-radius: 6px; padding: 7px 10px; font-size: 13px;
-            }
-        """)
-        srv_layout.addWidget(self.host_input)
-        main_layout.addWidget(srv_box)
 
     def _on_login_click(self):
         uname = self.login_user_input.text().strip()

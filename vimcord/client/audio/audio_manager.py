@@ -4,6 +4,7 @@ Audio Manager using sounddevice for low-latency capture, VAD, and mixed playback
 
 import collections
 import logging
+import sys
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
@@ -231,8 +232,66 @@ class AudioManager:
 
     def start_desktop_audio_capture(self):
         """Captures system/desktop audio during screen sharing to transmit screen sound."""
-        if getattr(self, "_desktop_stream", None) is not None:
+        if getattr(self, "_desktop_stream", None) is not None or getattr(self, "_desktop_pyaudio_stream", None) is not None:
             return
+
+        self._desktop_buffer = collections.deque(maxlen=15)
+
+        # 1. Primary engine: Windows WASAPI Loopback via pyaudiowpatch (captures exact speaker/headphone sound)
+        if sys.platform == "win32":
+            try:
+                import pyaudiowpatch as pyaudio
+                p = pyaudio.PyAudio()
+                wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+                default_speakers = p.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+                
+                loopback_dev = None
+                if default_speakers.get("isLoopbackDevice"):
+                    loopback_dev = default_speakers
+                else:
+                    for loopback in p.get_loopback_device_info_generator():
+                        if default_speakers["name"] in loopback["name"]:
+                            loopback_dev = loopback
+                            break
+                    if not loopback_dev:
+                        loopback_dev = p.get_default_wasapi_loopback()
+
+                if loopback_dev:
+                    in_channels = int(loopback_dev["maxInputChannels"])
+                    rate = int(loopback_dev["defaultSampleRate"])
+
+                    def _wasapi_cb(in_data, frame_count, time_info, status):
+                        try:
+                            arr = np.frombuffer(in_data, dtype=np.int16)
+                            if in_channels == 2:
+                                mono = (arr[0::2].astype(np.int32) + arr[1::2].astype(np.int32)) // 2
+                                mono_bytes = mono.astype(np.int16).tobytes()
+                            else:
+                                mono_bytes = in_data
+                            if hasattr(self, "_desktop_buffer"):
+                                self._desktop_buffer.append(mono_bytes)
+                        except Exception:
+                            pass
+                        return (None, pyaudio.paContinue)
+
+                    stream = p.open(
+                        format=pyaudio.paInt16,
+                        channels=in_channels,
+                        rate=rate,
+                        input=True,
+                        input_device_index=loopback_dev["index"],
+                        frames_per_buffer=SAMPLES_PER_FRAME,
+                        stream_callback=_wasapi_cb
+                    )
+                    stream.start_stream()
+                    self._desktop_pyaudio = p
+                    self._desktop_pyaudio_stream = stream
+                    logger.info(f"Started WASAPI loopback desktop audio capture on device: {loopback_dev['name']}")
+                    return
+            except Exception as e:
+                logger.debug(f"pyaudiowpatch loopback failed, trying fallback: {e}")
+
+        # 2. Fallback engine: sounddevice stereo mix
         try:
             stereo_dev = None
             devs = sd.query_devices()
@@ -243,7 +302,6 @@ class AudioManager:
                         stereo_dev = idx
                         break
             if stereo_dev is not None:
-                self._desktop_buffer = collections.deque(maxlen=10)
                 def _desktop_cb(indata, frames, time_info, status):
                     raw = indata.tobytes()
                     if hasattr(self, "_desktop_buffer"):
@@ -258,11 +316,26 @@ class AudioManager:
                     callback=_desktop_cb
                 )
                 self._desktop_stream.start()
-                logger.info(f"Started desktop audio capture on device {stereo_dev}")
+                logger.info(f"Started sounddevice desktop audio capture on device {stereo_dev}")
         except Exception as e:
             logger.debug(f"Desktop audio capture not available: {e}")
 
     def stop_desktop_audio_capture(self):
+        if getattr(self, "_desktop_pyaudio_stream", None) is not None:
+            try:
+                self._desktop_pyaudio_stream.stop_stream()
+                self._desktop_pyaudio_stream.close()
+            except Exception:
+                pass
+            self._desktop_pyaudio_stream = None
+
+        if getattr(self, "_desktop_pyaudio", None) is not None:
+            try:
+                self._desktop_pyaudio.terminate()
+            except Exception:
+                pass
+            self._desktop_pyaudio = None
+
         if getattr(self, "_desktop_stream", None) is not None:
             try:
                 self._desktop_stream.stop()
@@ -270,8 +343,9 @@ class AudioManager:
             except Exception:
                 pass
             self._desktop_stream = None
-            if hasattr(self, "_desktop_buffer"):
-                self._desktop_buffer.clear()
+
+        if hasattr(self, "_desktop_buffer"):
+            self._desktop_buffer.clear()
 
     def restart(self):
         self.stop()
@@ -436,37 +510,59 @@ class AudioManager:
         elif self.hangover_counter > 0:
             self.hangover_counter -= 1
 
+        # Check mic voice status
         if self.is_muted:
-            is_speaking = False
+            mic_speaking = False
         elif self.ptt_mode:
-            is_speaking = self.ptt_active
+            mic_speaking = self.ptt_active
         else:
-            is_speaking = (above_threshold or self.hangover_counter > 0)
+            mic_speaking = (above_threshold or self.hangover_counter > 0)
 
-        self.is_speaking = is_speaking
+        self.is_speaking = mic_speaking
 
         # Real-time Noise Suppression DSP (80Hz rumble filter + spectral gating + hysteresis)
         if self.noise_suppression:
             arr = np.frombuffer(raw_bytes, dtype=np.int16)
-            filtered_arr = self._noise_filter.process(arr, is_speaking)
-            raw_bytes = filtered_arr.tobytes()
-        elif not is_speaking:
-            raw_bytes = b"\x00" * len(raw_bytes)
+            filtered_arr = self._noise_filter.process(arr, mic_speaking)
+            processed_mic = filtered_arr.tobytes() if mic_speaking else b""
+        elif mic_speaking:
+            processed_mic = raw_bytes
+        else:
+            processed_mic = b""
 
-        # Mix desktop audio (screen share sound) if available
+        # Check desktop audio from screen sharing
+        dt_chunk = b""
+        has_desktop_audio = False
         if hasattr(self, "_desktop_buffer") and self._desktop_buffer:
             try:
                 dt_chunk = self._desktop_buffer.popleft()
-                raw_bytes = mix_audio_streams([raw_bytes, dt_chunk])
+                if dt_chunk and len(dt_chunk) == len(raw_bytes):
+                    dt_arr = np.frombuffer(dt_chunk, dtype=np.int16)
+                    # Detect audible desktop sound (peak above background floor)
+                    if np.max(np.abs(dt_arr)) > 250:
+                        has_desktop_audio = True
             except Exception:
                 pass
+
+        # Mix mic and desktop audio
+        if has_desktop_audio and processed_mic:
+            final_payload = mix_audio_streams([processed_mic, dt_chunk])
+            should_transmit = True
+        elif has_desktop_audio:
+            final_payload = dt_chunk
+            should_transmit = True
+        elif processed_mic:
+            final_payload = processed_mic
+            should_transmit = True
+        else:
+            final_payload = b""
+            should_transmit = False
 
         if self.loopback_test and not self.is_muted:
             self.add_peer_audio("__loopback__", raw_bytes)
 
         if self.on_mic_frame:
-            payload = b"" if (self.is_muted or (self.ptt_mode and not self.ptt_active)) else raw_bytes
-            self.on_mic_frame(payload, is_speaking, rms)
+            self.on_mic_frame(final_payload, should_transmit, rms)
 
     def _output_callback(self, outdata, frames, time_info, status):
         """Speaker playback callback."""

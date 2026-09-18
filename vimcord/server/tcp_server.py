@@ -361,6 +361,19 @@ class TCPServer:
                             "channel_id": channel_id
                         })
 
+                # 8b. RENAME CHANNEL
+                elif msg_type == "rename_channel":
+                    room_id = msg.get("room_id")
+                    channel_id = msg.get("channel_id")
+                    new_name = msg.get("name", "").strip()
+                    if room_id and channel_id and new_name and self.server_state.rename_channel(room_id, channel_id, new_name):
+                        await self.send_to_room_members(room_id, {
+                            "type": "channel_renamed",
+                            "room_id": room_id,
+                            "channel_id": channel_id,
+                            "name": new_name
+                        })
+
                 # 9. SERVER INVITES
                 elif msg_type == "create_room_invite":
                     room_id = msg.get("room_id")
@@ -577,7 +590,7 @@ class TCPServer:
                     else:
                         await self.send_to_user(current_user.user_id, {
                             "type": "call_failed",
-                            "reason": "Пользователь занят или недоступен"
+                            "reason": "User is busy or unavailable"
                         })
 
                 elif msg_type == "call_accept":

@@ -48,6 +48,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ptt_key": "Space",
     "stream_volume": 100,
     "call_volume": 100,
+    "stream_resolution": "720p",
+    "stream_fps": 15,
+    "stream_quality": 45,
 }
 
 
