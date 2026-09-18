@@ -223,38 +223,39 @@ class ServerState:
         self.db.rename_channel(channel_id, new_name)
         return True
 
-    def join_voice(self, user_id: str, room_id: str, channel_id: str) -> Tuple[bool, Optional[Tuple[str, str]]]:
+    def join_voice(self, user_id: str, room_id: str, channel_id: str) -> Tuple[bool, List[Tuple[str, str]]]:
         user = self.users.get(user_id)
         room = self.rooms.get(room_id)
         if not user or not room or channel_id not in room.channels:
-            return False, None
+            return False, []
         
         channel = room.channels[channel_id]
         if channel.channel_type != "voice":
-            return False, None
+            return False, []
             
-        prev_voice = self.leave_voice(user_id)
+        prev_voices = self.leave_voice(user_id)
         
         channel.voice_users.add(user_id)
         user.current_room_id = room_id
         user.current_voice_channel_id = channel_id
-        return True, prev_voice
+        return True, prev_voices
 
-    def leave_voice(self, user_id: str) -> Optional[Tuple[str, str]]:
+    def leave_voice(self, user_id: str) -> List[Tuple[str, str]]:
         user = self.users.get(user_id)
-        if not user or not user.current_voice_channel_id:
-            return None
-        
-        room_id = user.current_room_id
-        channel_id = user.current_voice_channel_id
-        
-        if room_id and room_id in self.rooms:
-            room = self.rooms[room_id]
-            if channel_id in room.channels:
-                room.channels[channel_id].voice_users.discard(user_id)
-                
-        user.current_voice_channel_id = None
-        return room_id, channel_id
+        left = []
+        if user and user.current_voice_channel_id:
+            left.append((user.current_room_id, user.current_voice_channel_id))
+            user.current_voice_channel_id = None
+
+        for r_id, room in self.rooms.items():
+            for c_id, channel in room.channels.items():
+                if channel.channel_type == "voice" and user_id in channel.voice_users:
+                    channel.voice_users.discard(user_id)
+                    item = (r_id, c_id)
+                    if item not in left:
+                        left.append(item)
+
+        return left
 
     def get_channel_voice_recipients(self, sender_id: str, channel_id: str) -> List[Tuple[str, int]]:
         recipients = []

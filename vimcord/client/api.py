@@ -70,6 +70,26 @@ class VimCordAPI:
         self._hotkey_mgr.set_ptt_config(ptt_enabled, ptt_key)
         self._hotkey_mgr.start()
 
+        # Restore audio devices and settings
+        in_dev = self._config.get("input_device")
+        out_dev = self._config.get("output_device")
+        if in_dev is not None:
+            try:
+                self._audio_manager.set_input_device(int(in_dev))
+            except Exception:
+                pass
+        if out_dev is not None:
+            try:
+                self._audio_manager.set_output_device(int(out_dev))
+            except Exception:
+                pass
+        if "mic_volume" in self._config:
+            self._audio_manager.mic_volume = max(0.0, min(2.0, float(self._config["mic_volume"]) / 100.0))
+        if "output_volume" in self._config:
+            self._audio_manager.output_volume = max(0.0, min(2.0, float(self._config["output_volume"]) / 100.0))
+        if "vad_threshold" in self._config:
+            self._audio_manager.vad_threshold = float(self._config["vad_threshold"])
+
         # Tray Manager
         self._tray = TrayManager(on_open=self._on_tray_open, on_quit=self.quit_app)
         self._tray.start()
@@ -146,12 +166,14 @@ class VimCordAPI:
             "config": cfg,
             "language": get_language(),
             "audio_devices": self.get_audio_devices(),
+            "input_device": cfg.get("input_device"),
+            "output_device": cfg.get("output_device"),
             "theme": cfg.get("theme", "dark"),
             "ptt_mode": self._audio_manager.ptt_mode,
             "ptt_key": getattr(self._hotkey_mgr, "ptt_key", "Space"),
             "mic_volume": int(getattr(self._audio_manager, "mic_volume", 1.0) * 100),
             "output_volume": int(getattr(self._audio_manager, "output_volume", 1.0) * 100),
-            "vad_threshold": getattr(self._audio_manager, "vad_threshold", 0.015),
+            "vad_threshold": getattr(self._audio_manager, "vad_threshold", 0.005),
             "dnd_mode": cfg.get("dnd_mode", False),
             "stream_resolution": cfg.get("stream_resolution", "720p"),
             "stream_fps": cfg.get("stream_fps", 15),
@@ -482,7 +504,13 @@ class VimCordAPI:
     # ---------------- Direct Calls & Voice Channels ----------------
 
     def join_voice(self, room_id: str, channel_id: str):
+        if self._current_voice_channel_id and self._current_voice_channel_id != channel_id:
+            try:
+                self._tcp_client.send_leave_voice()
+            except Exception:
+                pass
         self._current_voice_channel_id = channel_id
+        self._current_room_id = room_id
         self._udp_voice.current_channel_id = channel_id
         self._tcp_client.send_join_voice(room_id, channel_id)
         self._audio_manager.play_join_chime()
@@ -598,14 +626,14 @@ class VimCordAPI:
 
     def start_mic_test(self):
         self._audio_manager.loopback_test = True
-        def intercept(data, speaking, rms):
+        def intercept(rms, speaking):
             pct = min(100, int(rms * 600))
             self.dispatch_event("mic_test_level", {"level": pct, "speaking": speaking})
-        self._audio_manager.on_mic_frame = intercept
+        self._audio_manager.on_mic_level = intercept
 
     def stop_mic_test(self):
         self._audio_manager.loopback_test = False
-        self._audio_manager.on_mic_frame = None
+        self._audio_manager.on_mic_level = None
         self.dispatch_event("mic_test_level", {"level": 0, "speaking": False})
 
     def set_stream_settings(self, resolution: str, fps: int, quality: int):
@@ -636,11 +664,20 @@ class VimCordAPI:
                 pass
 
     def _on_screen_frame_captured(self, target_type: str, target_id: str, jpeg_data: bytes):
-        # Transmit frame over TCP
-        try:
-            self._tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
-        except Exception as e:
-            logger.debug(f"Failed to send screen frame: {e}")
+        # Prevent TCP socket buffer buildup and ping spikes by dropping frames if network transmission is busy
+        if getattr(self, "_is_transmitting_screen_frame", False):
+            return
+        self._is_transmitting_screen_frame = True
+
+        def _send_worker():
+            try:
+                self._tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
+            except Exception as e:
+                logger.debug(f"Failed to send screen frame: {e}")
+            finally:
+                self._is_transmitting_screen_frame = False
+
+        threading.Thread(target=_send_worker, daemon=True).start()
 
         # Throttle local frame dispatch so evaluate_js does not flood WebView2
         now = time.time()
@@ -659,8 +696,15 @@ class VimCordAPI:
         return self._audio_manager.get_available_devices()
 
     def set_audio_devices(self, input_device: Optional[int], output_device: Optional[int]):
-        self._audio_manager.set_input_device(input_device)
-        self._audio_manager.set_output_device(output_device)
+        updates = {}
+        if input_device is not None:
+            self._audio_manager.set_input_device(input_device)
+            updates["input_device"] = input_device
+        if output_device is not None:
+            self._audio_manager.set_output_device(output_device)
+            updates["output_device"] = output_device
+        if updates:
+            save_config(updates)
 
     def set_ptt_config(self, enabled: bool, hotkey: str):
         self._audio_manager.set_ptt_mode(enabled)
@@ -746,3 +790,10 @@ class VimCordAPI:
 
     def decline_friend_request(self, peer_id: str):
         self._tcp_client.send_decline_friend_request(peer_id)
+
+    def reconnect(self):
+        """Attempts to reconnect using saved credentials."""
+        if self._my_username:
+            cfg = load_config()
+            pwd = cfg.get("saved_password", "")
+            threading.Thread(target=lambda: self.login(self._my_username, pwd, True), daemon=True).start()

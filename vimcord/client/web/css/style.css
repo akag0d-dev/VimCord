@@ -194,11 +194,21 @@ body {
     gap: 8px;
     border-right: 1px solid var(--border-color);
     overflow-y: auto;
+    overflow-x: hidden;
     flex-shrink: 0;
+}
+#server-rail-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
 }
 .rail-btn {
     width: 48px;
     height: 48px;
+    min-height: 48px;
+    flex-shrink: 0;
     border-radius: 24px;
     background-color: var(--bg-card);
     color: var(--text-normal);
@@ -1094,9 +1104,6 @@ body {
     position: relative;
     transition: box-shadow 0.15s;
 }
-.voice-card.speaking {
-    box-shadow: 0 0 0 2px var(--green);
-}
 .voice-card-avatar {
     width: 64px;
     height: 64px;
@@ -1672,6 +1679,176 @@ select option, .settings-select option {
     color: var(--text-muted);
     margin-top: 2px;
 }
+
+/* Revamped Appearance & Theme Selector */
+.theme-options-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+.theme-picker-card {
+    background: var(--bg-input);
+    border: 2px solid var(--border-input);
+    border-radius: 8px;
+    padding: 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s ease;
+    position: relative;
+}
+.theme-picker-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+.theme-picker-card input[type="radio"] {
+    display: none;
+}
+.theme-picker-card.active, .theme-picker-card:has(input[type="radio"]:checked) {
+    border-color: var(--accent);
+    background: rgba(88, 101, 242, 0.08);
+    box-shadow: 0 0 12px rgba(88, 101, 242, 0.35);
+}
+.theme-preview-box {
+    height: 64px;
+    border-radius: 6px;
+    display: flex;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.theme-preview-box .preview-sidebar {
+    width: 28px;
+    height: 100%;
+}
+.theme-preview-box .preview-content {
+    flex: 1;
+    height: 100%;
+    padding: 8px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.preview-bubble {
+    height: 6px;
+    border-radius: 3px;
+    width: 80%;
+    background: var(--accent);
+}
+.preview-bubble.short {
+    width: 50%;
+    opacity: 0.6;
+}
+
+/* Theme Swatches Preview */
+.preview-dark {
+    background: #313338;
+}
+.preview-dark .preview-sidebar {
+    background: #2b2d31;
+}
+.preview-dark .preview-bubble {
+    background: #5865f2;
+}
+
+.preview-amoled {
+    background: #000000;
+}
+.preview-amoled .preview-sidebar {
+    background: #0e0f10;
+}
+.preview-amoled .preview-bubble {
+    background: #5865f2;
+}
+
+.preview-light {
+    background: #ffffff;
+}
+.preview-light .preview-sidebar {
+    background: #f2f3f5;
+}
+.preview-light .preview-bubble {
+    background: #5865f2;
+}
+
+.theme-card-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.theme-check-icon {
+    font-size: 18px;
+    color: var(--text-muted);
+    transition: color 0.15s;
+}
+.theme-picker-card.active .theme-check-icon,
+.theme-picker-card:has(input[type="radio"]:checked) .theme-check-icon {
+    color: var(--accent);
+}
+.theme-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-bright);
+}
+.theme-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Language Cards Grid */
+.lang-options-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+.lang-picker-card {
+    background: var(--bg-input);
+    border: 2px solid var(--border-input);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.2s ease;
+}
+.lang-picker-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+.lang-picker-card input[type="radio"] {
+    display: none;
+}
+.lang-picker-card.active, .lang-picker-card:has(input[type="radio"]:checked) {
+    border-color: var(--accent);
+    background: rgba(88, 101, 242, 0.08);
+    box-shadow: 0 0 12px rgba(88, 101, 242, 0.35);
+}
+.lang-flag {
+    font-size: 28px;
+    line-height: 1;
+}
+.lang-card-info {
+    flex: 1;
+}
+.lang-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-bright);
+}
+.lang-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.lang-check-icon {
+    font-size: 20px;
+    color: var(--text-muted);
+}
+.lang-picker-card.active .lang-check-icon,
+.lang-picker-card:has(input[type="radio"]:checked) .lang-check-icon {
+    color: var(--accent);
+}
+
 .screen-presets-row {
     display: flex;
     gap: 16px;
@@ -2182,5 +2359,66 @@ select option, .settings-select option {
 }
 .channel-action-btn .material-symbols-outlined {
     font-size: 15px;
+}
+
+/* Connection Lost Overlay */
+.connection-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+.connection-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 32px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 360px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+}
+.connection-spinner {
+    width: 44px;
+    height: 44px;
+    border: 4px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 16px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.connection-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 6px;
+}
+.connection-status {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+}
+.connection-retry-btn {
+    width: 100%;
+    padding: 10px 16px;
+}
+
+/* Screen Share Active Button */
+#btn-voice-screenshare.active, #btn-call-screenshare.active, .voice-action-btn.streaming {
+    background-color: var(--green) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(35, 165, 90, 0.6) !important;
 }
 

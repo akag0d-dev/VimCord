@@ -57,7 +57,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "language": "en",
     "theme": "dark",
     "dnd_mode": False,
+    "ptt_mode": False,  # Default to Voice Activity Detection (VAD) mode as requested
     "ptt_key": "Space",
+    "vad_threshold": 0.005,
+    "input_device": None,
+    "output_device": None,
+    "mic_volume": 100,
+    "output_volume": 100,
     "stream_volume": 100,
     "call_volume": 100,
     "stream_resolution": "720p",

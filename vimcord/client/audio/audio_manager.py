@@ -146,6 +146,8 @@ class AudioManager:
 
         # Callbacks
         self.on_mic_frame: Optional[Callable[[bytes, bool, float], None]] = None
+        self.on_mic_level: Optional[Callable[[float, bool], None]] = None
+        self.on_speaking_changed: Optional[Callable[[bool], None]] = None
         
         self._in_stream: Optional[sd.InputStream] = None
         self._out_stream: Optional[sd.OutputStream] = None
@@ -551,7 +553,13 @@ class AudioManager:
         else:
             mic_speaking = (above_threshold or self.hangover_counter > 0)
 
+        was_speaking = self.is_speaking
         self.is_speaking = mic_speaking
+        if was_speaking != mic_speaking and self.on_speaking_changed:
+            try:
+                self.on_speaking_changed(mic_speaking)
+            except Exception:
+                pass
 
         # Real-time Noise Suppression DSP (80Hz rumble filter + spectral gating + hysteresis)
         if self.noise_suppression:
@@ -593,6 +601,12 @@ class AudioManager:
 
         if self.loopback_test and not self.is_muted:
             self.add_peer_audio("__loopback__", raw_bytes)
+
+        if self.on_mic_level:
+            try:
+                self.on_mic_level(rms, mic_speaking)
+            except Exception:
+                pass
 
         if self.on_mic_frame:
             self.on_mic_frame(final_payload, should_transmit, rms)

@@ -87,8 +87,28 @@ class GlobalHotkeyManager:
         self._mouse_listener: Optional[mouse.Listener] = None
         self._lock = threading.Lock()
 
+    def _update_mouse_listener(self):
+        needed = self._recording or (self.ptt_mode and self.ptt_key.upper().startswith("MOUSE"))
+        if needed:
+            if self._mouse_listener is None or not self._mouse_listener.is_alive():
+                try:
+                    self._mouse_listener = mouse.Listener(on_click=self._on_mouse_click)
+                    self._mouse_listener.daemon = True
+                    self._mouse_listener.start()
+                    logger.debug("Mouse listener started")
+                except Exception as e:
+                    logger.error(f"Failed to start mouse listener: {e}")
+        else:
+            if self._mouse_listener is not None:
+                try:
+                    self._mouse_listener.stop()
+                except Exception:
+                    pass
+                self._mouse_listener = None
+                logger.debug("Mouse listener stopped")
+
     def start(self):
-        """Starts background global keyboard and mouse listeners."""
+        """Starts background global keyboard listener and conditionally mouse listener."""
         try:
             self._kb_listener = keyboard.Listener(
                 on_press=self._on_key_press,
@@ -96,13 +116,8 @@ class GlobalHotkeyManager:
             )
             self._kb_listener.daemon = True
             self._kb_listener.start()
-
-            self._mouse_listener = mouse.Listener(
-                on_click=self._on_mouse_click
-            )
-            self._mouse_listener.daemon = True
-            self._mouse_listener.start()
-            logger.info("Global hotkey listeners started")
+            self._update_mouse_listener()
+            logger.info("Global hotkey listeners initialized")
         except Exception as e:
             logger.error(f"Failed to start global hotkey listeners: {e}")
 
@@ -129,17 +144,20 @@ class GlobalHotkeyManager:
                 self._is_key_down = False
                 if self.on_ptt_state_changed:
                     self.on_ptt_state_changed(False)
+            self._update_mouse_listener()
 
     def start_recording(self, callback: Callable[[str], None]):
         """Enter recording mode to capture the next pressed key or mouse button."""
         with self._lock:
             self._recording = True
             self._record_callback = callback
+            self._update_mouse_listener()
 
     def stop_recording(self):
         with self._lock:
             self._recording = False
             self._record_callback = None
+            self._update_mouse_listener()
 
     def _get_key_vk(self, key) -> Optional[int]:
         if hasattr(key, 'vk') and key.vk is not None:
@@ -215,13 +233,17 @@ class GlobalHotkeyManager:
 
     def _on_key_press(self, key):
         if self._recording:
+            cb = None
+            name = None
             with self._lock:
                 if self._recording and self._record_callback:
                     name = self._format_key_name(key)
                     cb = self._record_callback
                     self._recording = False
                     self._record_callback = None
-                    cb(name)
+            if cb and name:
+                self._update_mouse_listener()
+                cb(name)
             return
 
         if not self.ptt_mode:
@@ -252,12 +274,15 @@ class GlobalHotkeyManager:
             return
 
         if self._recording and pressed:
+            cb = None
             with self._lock:
                 if self._recording and self._record_callback:
                     cb = self._record_callback
                     self._recording = False
                     self._record_callback = None
-                    cb(btn_name)
+            if cb:
+                self._update_mouse_listener()
+                cb(btn_name)
             return
 
         if not self.ptt_mode:

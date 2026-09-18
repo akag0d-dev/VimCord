@@ -155,7 +155,7 @@ async function initApp() {
         document.getElementById('cb-dnd-mode').checked = state.dndMode;
 
         renderPttSettings(state.pttMode, state.pttKey);
-        populateAudioDevices(initData.audio_devices || {});
+        populateAudioDevices(initData.audio_devices || {}, initData.input_device, initData.output_device);
 
         // Pre-fill login credentials if saved
         if (initData.saved_username) {
@@ -328,17 +328,19 @@ function bindDomEvents() {
     document.getElementById('slider-screen-quality').oninput = onStreamSettingChange;
 
     // Settings Appearance & DND
-    document.querySelectorAll('input[name="theme_select"]').forEach(radio => {
-        radio.onchange = () => {
-            applyTheme(radio.value);
-            window.pywebview.api.set_theme(radio.value);
+    document.querySelectorAll('.theme-picker-card').forEach(card => {
+        card.onclick = () => {
+            const th = card.dataset.theme;
+            applyTheme(th);
+            window.pywebview.api.set_theme(th);
         };
     });
 
-    document.querySelectorAll('input[name="lang_select"]').forEach(radio => {
-        radio.onchange = () => {
-            applyLanguage(radio.value);
-            window.pywebview.api.set_language(radio.value);
+    document.querySelectorAll('.lang-picker-card').forEach(card => {
+        card.onclick = () => {
+            const lng = card.dataset.lang;
+            applyLanguage(lng);
+            window.pywebview.api.set_language(lng);
         };
     });
 
@@ -346,6 +348,10 @@ function bindDomEvents() {
         state.dndMode = e.target.checked;
         window.pywebview.api.set_dnd_mode(state.dndMode);
     };
+
+    // Reconnection Overlay Retry Button
+    const btnReconn = document.getElementById('btn-reconnect-now');
+    if (btnReconn) btnReconn.onclick = triggerReconnect;
 
     // Auth Form Submit & Tabs
     document.getElementById('form-auth').onsubmit = handleAuthSubmit;
@@ -396,9 +402,10 @@ function bindDomEvents() {
             const isHidden = popupServerOpts.classList.contains('hidden');
             if (isHidden) {
                 const room = state.rooms[state.currentRoomId];
+                const isDefault = state.currentRoomId === 'room-default';
                 const isOwner = room && room.owner_id === state.user?.user_id;
-                document.getElementById('menu-opt-delete-server').classList.toggle('hidden', !isOwner);
-                document.getElementById('menu-opt-leave-server').classList.toggle('hidden', isOwner);
+                document.getElementById('menu-opt-delete-server').classList.toggle('hidden', isDefault || !isOwner);
+                document.getElementById('menu-opt-leave-server').classList.toggle('hidden', isDefault);
 
                 popupServerOpts.classList.remove('hidden');
                 if (arrowServer) arrowServer.classList.add('open');
@@ -600,6 +607,12 @@ function setupDragAndDrop() {
 
 window.onVimCordEvent = function(eventName, payload) {
     switch (eventName) {
+        case 'connected':
+            onConnected();
+            break;
+        case 'disconnected':
+            onDisconnected();
+            break;
         case 'login_response':
             onLoginResponse(payload);
             break;
@@ -649,6 +662,9 @@ window.onVimCordEvent = function(eventName, payload) {
             break;
         case 'screen_frame':
             onScreenFrame(payload);
+            break;
+        case 'local_screen_frame':
+            onLocalScreenFrame(payload);
             break;
         case 'screen_stop':
             onScreenStop(payload);
@@ -722,6 +738,83 @@ function hideAuthError() {
     if (err) err.classList.add('hidden');
 }
 
+let reconnectCountdownInterval = null;
+let reconnectSecondsLeft = 5;
+
+function showReconnectOverlay() {
+    if (!state.user) return; // Only show if user was previously connected/authenticated
+    const overlay = document.getElementById('connection-overlay');
+    if (!overlay) return;
+
+    overlay.classList.remove('hidden');
+    reconnectSecondsLeft = 5;
+    const txt = document.getElementById('conn-overlay-text');
+    if (txt) {
+        txt.textContent = state.language === 'ru' 
+            ? `Повторное подключение через ${reconnectSecondsLeft}с...`
+            : `Reconnecting in ${reconnectSecondsLeft}s...`;
+    }
+    const title = document.getElementById('conn-overlay-title');
+    if (title) {
+        title.textContent = state.language === 'ru' ? 'Подключение потеряно' : 'Connection Lost';
+    }
+    const retryBtn = document.getElementById('btn-reconnect-now');
+    if (retryBtn) {
+        retryBtn.textContent = state.language === 'ru' ? 'Подключиться сейчас' : 'Reconnect Now';
+    }
+
+    if (reconnectCountdownInterval) {
+        clearInterval(reconnectCountdownInterval);
+    }
+
+    reconnectCountdownInterval = setInterval(() => {
+        reconnectSecondsLeft -= 1;
+        if (reconnectSecondsLeft <= 0) {
+            clearInterval(reconnectCountdownInterval);
+            reconnectCountdownInterval = null;
+            if (txt) {
+                txt.textContent = state.language === 'ru' ? 'Подключение...' : 'Connecting...';
+            }
+            triggerReconnect();
+        } else {
+            if (txt) {
+                txt.textContent = state.language === 'ru' 
+                    ? `Повторное подключение через ${reconnectSecondsLeft}с...`
+                    : `Reconnecting in ${reconnectSecondsLeft}s...`;
+            }
+        }
+    }, 1000);
+}
+
+function hideReconnectOverlay() {
+    if (reconnectCountdownInterval) {
+        clearInterval(reconnectCountdownInterval);
+        reconnectCountdownInterval = null;
+    }
+    const overlay = document.getElementById('connection-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function triggerReconnect() {
+    if (reconnectCountdownInterval) {
+        clearInterval(reconnectCountdownInterval);
+        reconnectCountdownInterval = null;
+    }
+    const txt = document.getElementById('conn-overlay-text');
+    if (txt) {
+        txt.textContent = state.language === 'ru' ? 'Подключение...' : 'Connecting...';
+    }
+    window.pywebview.api.reconnect();
+}
+
+function onDisconnected() {
+    showReconnectOverlay();
+}
+
+function onConnected() {
+    hideReconnectOverlay();
+}
+
 async function handleAuthSubmit(e) {
     if (e) e.preventDefault();
     const u = document.getElementById('auth-username').value.trim();
@@ -778,6 +871,8 @@ function onLoginResponse(res) {
         showAuthError(res.data?.message || res.message || 'Login failed. Please check credentials.');
         return;
     }
+
+    hideReconnectOverlay();
 
     // Success: Transition to main workspace
     document.getElementById('auth-container').classList.add('hidden');
@@ -930,6 +1025,7 @@ function renderServerRail() {
 
         btn.oncontextmenu = (e) => {
             e.preventDefault();
+            if (room.room_id === 'room-default') return;
             const isOwner = room.owner_id === state.user?.user_id;
             const action = isOwner ? 'Delete Server' : 'Leave Server';
             showConfirmModal({
@@ -1230,6 +1326,20 @@ function onVoiceStateUpdate(payload) {
     state.voiceUsers[channel_id] = state.voiceUsers[channel_id] || [];
 
     if (action === 'join') {
+        // Purge user from all other voice channels to prevent multi-room ghosting
+        Object.keys(state.voiceUsers).forEach(otherChId => {
+            if (otherChId !== channel_id && state.voiceUsers[otherChId]) {
+                const hadUser = state.voiceUsers[otherChId].some(x => x.user_id === user_id);
+                if (hadUser) {
+                    state.voiceUsers[otherChId] = state.voiceUsers[otherChId].filter(x => x.user_id !== user_id);
+                    const otherCont = document.getElementById(`voice-users-${otherChId}`);
+                    if (otherCont) {
+                        renderChannelVoiceUsers(otherCont, otherChId);
+                    }
+                }
+            }
+        });
+
         const u = state.users[user_id] || { user_id, username: user_id, display_name: user_id };
         const existing = state.voiceUsers[channel_id].find(x => x.user_id === user_id);
         if (!existing) {
@@ -2025,8 +2135,22 @@ function updateUserSpeakingState(userId, isSpeaking) {
 
 // ---------------- Screen Sharing ----------------
 
+function updateScreenShareButtons(active) {
+    const btnVoice = document.getElementById('btn-voice-screenshare');
+    if (btnVoice) {
+        btnVoice.classList.toggle('active', active);
+        btnVoice.classList.toggle('streaming', active);
+    }
+    const btnCall = document.getElementById('btn-call-screenshare');
+    if (btnCall) {
+        btnCall.classList.toggle('active', active);
+        btnCall.classList.toggle('streaming', active);
+    }
+}
+
 function toggleScreenShare() {
     state.isSharingScreen = !state.isSharingScreen;
+    updateScreenShareButtons(state.isSharingScreen);
     const targetType = state.currentDmPeerId ? 'dm' : 'channel';
     const targetId = state.currentDmPeerId || state.currentVoiceChannelId || state.currentChannelId;
 
@@ -2038,6 +2162,23 @@ function toggleScreenShare() {
         showToast('Screen sharing stopped');
         document.getElementById('voice-screen-stream-box').classList.add('hidden');
         document.getElementById('dm-call-screen-container').classList.add('hidden');
+    }
+}
+
+function onLocalScreenFrame(data) {
+    if (!state.isSharingScreen) return;
+    const stageBox = document.getElementById('voice-screen-stream-box');
+    const stageImg = document.getElementById('voice-stage-screen-img');
+    if (stageBox && stageImg && state.currentVoiceChannelId) {
+        stageBox.classList.remove('hidden');
+        stageImg.src = `data:image/jpeg;base64,${data.frame}`;
+    }
+
+    const dmBox = document.getElementById('dm-call-screen-container');
+    const dmImg = document.getElementById('dm-call-screen-img');
+    if (dmBox && dmImg && (state.activeCallId || state.currentDmPeerId)) {
+        dmBox.classList.remove('hidden');
+        dmImg.src = `data:image/jpeg;base64,${data.frame}`;
     }
 }
 
@@ -2062,7 +2203,11 @@ function onScreenFrame(data) {
 function onScreenStop(data) {
     document.getElementById('voice-screen-stream-box').classList.add('hidden');
     document.getElementById('dm-call-screen-container').classList.add('hidden');
-    showToast('Screen share ended by peer');
+    if (state.isSharingScreen) {
+        state.isSharingScreen = false;
+        updateScreenShareButtons(false);
+    }
+    showToast('Screen share ended');
 }
 
 // ---------------- Audio Controls (Mute / Deafen) ----------------
@@ -2175,7 +2320,7 @@ function refreshProfilePreview() {
 
     // Names preview
     document.getElementById('settings-disp-preview').textContent = dName;
-    document.getElementById('settings-user-preview').textContent = `@${state.user?.username || 'user'} • ID: ${state.user?.user_id || ''}`;
+    document.getElementById('settings-user-preview').textContent = `@${state.user?.username || 'user'}`;
     const stVal = document.getElementById('settings-custom-status').value.trim();
     document.getElementById('settings-status-preview').textContent = stVal || 'Online';
 }
@@ -2329,16 +2474,23 @@ function onMicTestLevel(data) {
 }
 
 function applyTheme(th) {
+    state.theme = th;
     document.body.className = `theme-${th}`;
-    document.querySelectorAll('input[name="theme_select"]').forEach(radio => {
-        radio.checked = (radio.value === th);
+    document.querySelectorAll('.theme-picker-card').forEach(card => {
+        const isMatch = (card.dataset.theme === th);
+        card.classList.toggle('active', isMatch);
+        const radio = card.querySelector('input[type="radio"]');
+        if (radio) radio.checked = isMatch;
     });
 }
 
 function applyLanguage(lng) {
     state.language = lng;
-    document.querySelectorAll('input[name="lang_select"]').forEach(radio => {
-        radio.checked = (radio.value === lng);
+    document.querySelectorAll('.lang-picker-card').forEach(card => {
+        const isMatch = (card.dataset.lang === lng);
+        card.classList.toggle('active', isMatch);
+        const radio = card.querySelector('input[type="radio"]');
+        if (radio) radio.checked = isMatch;
     });
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.dataset.i18n;
@@ -2348,7 +2500,7 @@ function applyLanguage(lng) {
     });
 }
 
-function populateAudioDevices(devs) {
+function populateAudioDevices(devs, savedInput = null, savedOutput = null) {
     const inSel = document.getElementById('select-audio-input');
     const outSel = document.getElementById('select-audio-output');
     if (!inSel || !outSel) return;
@@ -2360,6 +2512,9 @@ function populateAudioDevices(devs) {
         const opt = document.createElement('option');
         opt.value = d.id;
         opt.textContent = d.name;
+        if (savedInput !== null && savedInput !== undefined && String(d.id) === String(savedInput)) {
+            opt.selected = true;
+        }
         inSel.appendChild(opt);
     });
 
@@ -2367,6 +2522,9 @@ function populateAudioDevices(devs) {
         const opt = document.createElement('option');
         opt.value = d.id;
         opt.textContent = d.name;
+        if (savedOutput !== null && savedOutput !== undefined && String(d.id) === String(savedOutput)) {
+            opt.selected = true;
+        }
         outSel.appendChild(opt);
     });
 }

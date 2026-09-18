@@ -61,6 +61,25 @@ def main():
     )
     api.set_window(window)
 
+    def on_shown():
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = None
+                if hasattr(window, "native") and window.native:
+                    if hasattr(window.native, "Handle"):
+                        hwnd = int(window.native.Handle)
+                if hwnd:
+                    GWL_STYLE = -16
+                    WS_THICKFRAME = 0x00040000
+                    style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+                    logger.info("Enabled native frameless window resizing")
+            except Exception as e:
+                logger.debug(f"Could not enable window resizing: {e}")
+
+    window.events.shown += on_shown
+
     def on_closing():
         api._tray.update_speaking(False)
 

@@ -127,7 +127,16 @@ class TCPServer:
                         await writer.drain()
                         continue
 
-                    # If already connected, disconnect old session
+                    # If already connected, disconnect old session and clear voice channels
+                    prev_left = self.server_state.leave_voice(u_data["user_id"])
+                    for pr_id, pc_id in prev_left:
+                        await self.broadcast({
+                            "type": "voice_state_update",
+                            "user_id": u_data["user_id"],
+                            "room_id": pr_id,
+                            "channel_id": pc_id,
+                            "action": "leave"
+                        })
                     old_session = self.server_state.users.get(u_data["user_id"])
                     if old_session:
                         self.server_state.remove_user(u_data["user_id"])
@@ -548,10 +557,9 @@ class TCPServer:
                 elif msg_type == "join_voice":
                     room_id = msg.get("room_id")
                     channel_id = msg.get("channel_id")
-                    ok, prev = self.server_state.join_voice(current_user.user_id, room_id, channel_id)
+                    ok, prev_list = self.server_state.join_voice(current_user.user_id, room_id, channel_id)
                     if ok:
-                        if prev:
-                            prev_room_id, prev_channel_id = prev
+                        for prev_room_id, prev_channel_id in prev_list:
                             await self.broadcast({
                                 "type": "voice_state_update",
                                 "user_id": current_user.user_id,
@@ -570,9 +578,8 @@ class TCPServer:
                         })
 
                 elif msg_type == "leave_voice":
-                    prev = self.server_state.leave_voice(current_user.user_id)
-                    if prev:
-                        room_id, channel_id = prev
+                    prev_list = self.server_state.leave_voice(current_user.user_id)
+                    for room_id, channel_id in prev_list:
                         await self.broadcast({
                             "type": "voice_state_update",
                             "user_id": current_user.user_id,
@@ -671,6 +678,14 @@ class TCPServer:
                                 "target_id": target_id,
                                 "data": b64_data
                             })
+                    elif target_type in ("dm", "user"):
+                        await self.send_to_user(target_id, {
+                            "type": "screen_frame",
+                            "sender_id": current_user.user_id,
+                            "sender_name": current_user.username,
+                            "target_id": target_id,
+                            "data": b64_data
+                        })
 
                 elif msg_type == "screen_stop":
                     target_type = msg.get("target_type")
@@ -696,6 +711,12 @@ class TCPServer:
                                 "sender_id": current_user.user_id,
                                 "target_id": target_id
                             })
+                    elif target_type in ("dm", "user"):
+                        await self.send_to_user(target_id, {
+                            "type": "screen_stop",
+                            "sender_id": current_user.user_id,
+                            "target_id": target_id
+                        })
 
         except (asyncio.CancelledError, ConnectionResetError):
             pass
@@ -704,15 +725,14 @@ class TCPServer:
         finally:
             if current_user:
                 logger.info(f"User disconnected: {current_user.username} ({current_user.user_id})")
-                prev_room_id = current_user.current_room_id
-                prev_channel_id = current_user.current_voice_channel_id
+                prev_left = self.server_state.leave_voice(current_user.user_id)
                 self.server_state.remove_user(current_user.user_id)
-                if prev_room_id and prev_channel_id:
+                for pr_id, pc_id in prev_left:
                     await self.broadcast({
                         "type": "voice_state_update",
                         "user_id": current_user.user_id,
-                        "room_id": prev_room_id,
-                        "channel_id": prev_channel_id,
+                        "room_id": pr_id,
+                        "channel_id": pc_id,
                         "action": "leave"
                     })
                 await self.broadcast({

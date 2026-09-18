@@ -138,6 +138,61 @@ class TestVimCordAPIBridge(unittest.TestCase):
         self.assertEqual(state["stream_quality"], 75)
         self.assertTrue(state["dnd_mode"])
 
+    def test_dynamic_mouse_listener_management(self):
+        mgr = GlobalHotkeyManager()
+        # Default: VAD mode, no mouse listener needed
+        mgr.set_ptt_config(False, "Space")
+        self.assertIsNone(mgr._mouse_listener)
+
+        # PTT with keyboard key: no mouse listener needed
+        mgr.set_ptt_config(True, "Caps Lock")
+        self.assertIsNone(mgr._mouse_listener)
+
+        # PTT with Mouse 5: mouse listener is started
+        mgr.set_ptt_config(True, "Mouse 5")
+        self.assertIsNotNone(mgr._mouse_listener)
+
+        # Switched back to Space: mouse listener is stopped
+        mgr.set_ptt_config(True, "Space")
+        self.assertIsNone(mgr._mouse_listener)
+
+        # Recording mode: mouse listener is started
+        mgr.start_recording(lambda k: None)
+        self.assertIsNotNone(mgr._mouse_listener)
+
+        # Recording stopped: mouse listener is stopped
+        mgr.stop_recording()
+        self.assertIsNone(mgr._mouse_listener)
+        mgr.stop()
+
+    def test_audio_mic_test_does_not_destroy_mic_frame_callback(self):
+        api = VimCordAPI()
+        # Simulate UDPVoiceClient having attached on_mic_frame
+        original_callback = MagicMock()
+        api._audio_manager.on_mic_frame = original_callback
+
+        api.start_mic_test()
+        self.assertEqual(api._audio_manager.on_mic_frame, original_callback)
+        self.assertIsNotNone(api._audio_manager.on_mic_level)
+
+        api.stop_mic_test()
+        self.assertEqual(api._audio_manager.on_mic_frame, original_callback)
+        self.assertIsNone(api._audio_manager.on_mic_level)
+
+        api._hotkey_mgr.stop()
+        api._tray.stop()
+
+    def test_audio_devices_persistence(self):
+        api = VimCordAPI()
+        api.set_audio_devices(1, 2)
+        self.assertEqual(api._audio_manager.input_device, 1)
+        self.assertEqual(api._audio_manager.output_device, 2)
+
+        # Setting only input device should not overwrite output device
+        api.set_audio_devices(3, None)
+        self.assertEqual(api._audio_manager.input_device, 3)
+        self.assertEqual(api._audio_manager.output_device, 2)
+
         api._hotkey_mgr.stop()
         api._tray.stop()
 

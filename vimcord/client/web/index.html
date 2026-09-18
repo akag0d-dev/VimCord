@@ -552,30 +552,62 @@
 
                 <!-- Appearance & Notifications Settings Page -->
                 <div id="settings-tab-appearance" class="settings-page hidden">
-                    <h2>Appearance & Notifications</h2>
+                    <h2 data-i18n="appearance">Appearance & Notifications</h2>
                     
                     <div class="settings-section">
                         <label>APPLICATION THEME</label>
-                        <div class="theme-options">
-                            <label class="theme-card">
+                        <div class="theme-options-grid">
+                            <label class="theme-picker-card" data-theme="dark">
                                 <input type="radio" name="theme_select" value="dark" checked>
-                                <div class="theme-card-body">
-                                    <div class="theme-name">Dark (Discord Dark)</div>
-                                    <div class="theme-desc">Classic Discord dark theme</div>
+                                <div class="theme-preview-box preview-dark">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content">
+                                        <div class="preview-bubble"></div>
+                                        <div class="preview-bubble short"></div>
+                                    </div>
+                                </div>
+                                <div class="theme-card-info">
+                                    <span class="material-symbols-outlined theme-check-icon">check_circle</span>
+                                    <div>
+                                        <div class="theme-name">Dark</div>
+                                        <div class="theme-desc">Classic Discord</div>
+                                    </div>
                                 </div>
                             </label>
-                            <label class="theme-card">
+
+                            <label class="theme-picker-card" data-theme="amoled">
                                 <input type="radio" name="theme_select" value="amoled">
-                                <div class="theme-card-body">
-                                    <div class="theme-name">Midnight (AMOLED)</div>
-                                    <div class="theme-desc">Deep #000000 black for high contrast OLED displays</div>
+                                <div class="theme-preview-box preview-amoled">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content">
+                                        <div class="preview-bubble"></div>
+                                        <div class="preview-bubble short"></div>
+                                    </div>
+                                </div>
+                                <div class="theme-card-info">
+                                    <span class="material-symbols-outlined theme-check-icon">check_circle</span>
+                                    <div>
+                                        <div class="theme-name">Midnight</div>
+                                        <div class="theme-desc">AMOLED Black</div>
+                                    </div>
                                 </div>
                             </label>
-                            <label class="theme-card">
+
+                            <label class="theme-picker-card" data-theme="light">
                                 <input type="radio" name="theme_select" value="light">
-                                <div class="theme-card-body">
-                                    <div class="theme-name">Light (Discord Light)</div>
-                                    <div class="theme-desc">Crisp light user interface theme</div>
+                                <div class="theme-preview-box preview-light">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content">
+                                        <div class="preview-bubble"></div>
+                                        <div class="preview-bubble short"></div>
+                                    </div>
+                                </div>
+                                <div class="theme-card-info">
+                                    <span class="material-symbols-outlined theme-check-icon">check_circle</span>
+                                    <div>
+                                        <div class="theme-name">Light</div>
+                                        <div class="theme-desc">Daylight Clean</div>
+                                    </div>
                                 </div>
                             </label>
                         </div>
@@ -583,20 +615,25 @@
 
                     <div class="settings-section">
                         <label>INTERFACE LANGUAGE / ЯЗЫК ИНТЕРФЕЙСА</label>
-                        <div class="lang-options">
-                            <label class="theme-card">
-                                <input type="radio" name="lang_select" value="en" checked>
-                                <div class="theme-card-body">
-                                    <div class="theme-name">English</div>
-                                    <div class="theme-desc">Default language</div>
+                        <div class="lang-options-grid">
+                            <label class="lang-picker-card" data-lang="en">
+                                <input type="radio" name="lang_select" value="en">
+                                <div class="lang-flag">🇬🇧</div>
+                                <div class="lang-card-info">
+                                    <div class="lang-title">English</div>
+                                    <div class="lang-sub">Default language</div>
                                 </div>
+                                <span class="material-symbols-outlined lang-check-icon">check_circle</span>
                             </label>
-                            <label class="theme-card">
-                                <input type="radio" name="lang_select" value="ru">
-                                <div class="theme-card-body">
-                                    <div class="theme-name">Русский</div>
-                                    <div class="theme-desc">Русский интерфейс и контекстное меню трея</div>
+
+                            <label class="lang-picker-card" data-lang="ru">
+                                <input type="radio" name="lang_select" value="ru" checked>
+                                <div class="lang-flag">🇷🇺</div>
+                                <div class="lang-card-info">
+                                    <div class="lang-title">Русский</div>
+                                    <div class="lang-sub">Полная локализация</div>
                                 </div>
+                                <span class="material-symbols-outlined lang-check-icon">check_circle</span>
                             </label>
                         </div>
                         <p class="settings-hint">Changes apply immediately to all UI labels and System Tray menu items.</p>
@@ -712,6 +749,16 @@
                     </button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- 8. Connection Lost / Reconnection Overlay -->
+    <div id="connection-overlay" class="connection-overlay hidden">
+        <div class="connection-card">
+            <div class="connection-spinner"></div>
+            <div class="connection-title" id="conn-overlay-title">Connection Lost</div>
+            <div class="connection-status" id="conn-overlay-text">Reconnecting in 5s...</div>
+            <button type="button" id="btn-reconnect-now" class="primary-btn connection-retry-btn">Reconnect Now</button>
         </div>
     </div>
 
