@@ -711,15 +711,20 @@ class SettingsDialog(QDialog):
         sc_row = QHBoxLayout()
         sc_row.addWidget(QLabel("Resolution:"))
         self.sc_res_combo = QComboBox()
-        self.sc_res_combo.addItems(["360p", "480p", "720p", "1080p"])
+        self.sc_res_combo.addItems(["480p", "720p", "1080p"])
+        if saved_res not in ["480p", "720p", "1080p"]:
+            saved_res = "720p"
         self.sc_res_combo.setCurrentText(saved_res)
         sc_row.addWidget(self.sc_res_combo)
 
         sc_row.addWidget(QLabel("FPS:"))
         self.sc_fps_combo = QComboBox()
-        self.sc_fps_combo.addItems(["10", "15", "20", "30", "60"])
+        self.sc_fps_combo.addItems(["15", "24", "30"])
+        if saved_fps not in ["15", "24", "30"]:
+            saved_fps = "30"
         self.sc_fps_combo.setCurrentText(saved_fps)
         sc_row.addWidget(self.sc_fps_combo)
+
 
         sc_row.addStretch(1)
         layout.addLayout(sc_row)

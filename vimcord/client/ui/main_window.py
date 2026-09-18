@@ -5,6 +5,7 @@ Voice Stage with animated VAD & Screen Sharing, and Account Settings.
 """
 
 import logging
+import sys
 import time
 import uuid
 from typing import Dict, Any, List, Optional
@@ -33,7 +34,9 @@ from vimcord.client.ui.voice_view import VoiceView
 from vimcord.client.ui.chat_view import ChatView
 from vimcord.client.ui.friends_view import FriendsView
 from vimcord.client.ui.call_overlay import IncomingCallDialog, ActiveCallBanner
+from vimcord.client.ui.dm_call_widget import DMCallWidget
 from vimcord.client.ui.settings_dialog import SettingsDialog
+
 from vimcord.client.ui.profile_modal import UserProfileModal
 from vimcord.client.ui.screen_window import ScreenShareWindow
 from vimcord.client.ui.toast_notification import ToastNotification, show_windows_toast
@@ -324,19 +327,21 @@ class MainWindow(QMainWindow):
         self.friends_view = FriendsView(self.main_stack)
         self.main_stack.addWidget(self.friends_view)
 
-        # View 1: Chat View (100% full height, no awkward splitter)
+        # View 1: Chat View (with embedded DM Call Widget at top ~1/3)
         chat_container = QWidget()
         c_layout = QVBoxLayout(chat_container)
         c_layout.setContentsMargins(0, 0, 0, 0)
         c_layout.setSpacing(0)
 
-        self.call_banner = ActiveCallBanner(chat_container)
-        self.call_banner.hide()
-        c_layout.addWidget(self.call_banner)
+        self.dm_call_widget = DMCallWidget(chat_container)
+        self.dm_call_widget.hide()
+        c_layout.addWidget(self.dm_call_widget)
+        self.call_banner = self.dm_call_widget  # backwards compatibility
 
         self.chat_view = ChatView(chat_container)
         c_layout.addWidget(self.chat_view, 1)
         self.main_stack.addWidget(chat_container)
+
 
         # View 2: Voice Stage View (Full stage when viewing voice channel)
         voice_container = QWidget()
@@ -412,8 +417,10 @@ class MainWindow(QMainWindow):
         self.voice_view.stream_volume_changed.connect(self._on_stream_volume_changed)
         self.voice_view.peer_volume_changed.connect(self.audio_manager.set_peer_volume)
         self.voice_view.peer_mute_toggled.connect(self.audio_manager.set_peer_muted)
-        self.call_banner.end_call_clicked.connect(self._on_end_active_call)
-        self.call_banner.volume_changed.connect(self._on_call_volume_changed)
+        self.dm_call_widget.end_call_clicked.connect(self._on_end_active_call)
+        self.dm_call_widget.screen_share_clicked.connect(lambda: self._on_screen_share_toggled(None))
+        self.dm_call_widget.user_profile_requested.connect(self._open_user_profile)
+
 
         # Member List sidebar
         self.member_list.view_profile_requested.connect(lambda uid: self._open_user_profile({"user_id": uid}))
@@ -695,8 +702,34 @@ class MainWindow(QMainWindow):
             if self.active_call_id:
                 self._on_end_active_call()
 
+        peer_info = self.users.get(user_id, {})
+        peer_name = peer_info.get("display_name") or peer_info.get("username", "User")
+
+        # Open DM chat with this user so the call widget is rendered right in the DM view
+        self._on_dm_user_selected(user_id, peer_name)
+
+        my_user = {
+            "user_id": self.my_user_id,
+            "username": self.my_username,
+            "display_name": getattr(self, "my_display_name", self.my_username) or self.my_username,
+            "avatar_color": self.my_avatar_color,
+            "avatar_image": getattr(self, "my_avatar_image", ""),
+            "is_muted": self.user_panel.is_muted,
+            "is_deafened": self.user_panel.is_deafened
+        }
+        peer_user = {
+            "user_id": user_id,
+            "username": peer_info.get("username", peer_name),
+            "display_name": peer_name,
+            "avatar_color": peer_info.get("avatar_color", "#5865F2"),
+            "avatar_image": peer_info.get("avatar_image", "")
+        }
+
+        self.pending_call_peer_id = user_id
+        self.dm_call_widget.start_ringing(my_user, peer_user, is_outgoing=True)
         self.audio_manager.start_ringtone("outgoing")
         self.tcp_client.send_call_start(user_id)
+
 
     # ------------------ Text Chat ------------------
 
@@ -833,8 +866,10 @@ class MainWindow(QMainWindow):
             self.audio_manager.start_desktop_audio_capture()
             self.voice_bar.set_screen_sharing(True)
             self.voice_view.screen_btn.setText("🔴 Stop Screen")
+            self.voice_view.show_local_stream_active(self.my_display_name or self.my_username)
             self.screen_share_window.set_streamer(self.my_display_name or self.my_username, is_local=True)
-            # Stream is displayed directly inside VoiceView stage - no unwanted popup window
+            if hasattr(self, "dm_call_widget"):
+                self.dm_call_widget.set_screen_sharing(True)
         else:
             self.screen_capturer.stop_sharing()
             self.audio_manager.stop_desktop_audio_capture()
@@ -843,6 +878,9 @@ class MainWindow(QMainWindow):
             self.voice_view.screen_btn.setText("🖥️ Screen")
             self.screen_share_window.hide()
             self.voice_view.hide_screen_share()
+            if hasattr(self, "dm_call_widget"):
+                self.dm_call_widget.set_screen_sharing(False)
+
 
     def _send_screen_frame(self, target_type: str, target_id: str, jpeg_data: bytes):
         # 100% UDP transmission with 1200-byte datagram chunks (Discord architecture)
@@ -855,7 +893,7 @@ class MainWindow(QMainWindow):
             if pixmap.loadFromData(jpeg_data, "JPEG"):
                 self.screen_share_window.set_streamer(self.my_display_name or self.my_username, is_local=True)
                 self.screen_share_window.update_frame(pixmap)
-        self.voice_view.display_screen_frame(self.my_display_name or self.my_username, jpeg_data)
+
 
     def _on_screen_frame_received(self, sender_id: str, jpeg_data: bytes):
         now = time.time()
@@ -921,27 +959,68 @@ class MainWindow(QMainWindow):
         self.tcp_client.send_call_decline(call_id)
 
     def _on_call_ringing(self, call_id: str, target_user_id: str):
-        pass
+        self.active_call_id = call_id
+        self.pending_call_peer_id = target_user_id
 
     def _on_call_accepted(self, call_id: str, peer_id: str, peer_name: str):
         self.audio_manager.stop_ringtone()
         self.active_call_id = call_id
         self.active_call_peer_name = peer_name
         self.udp_voice.active_call_id = call_id
+        self.pending_call_peer_id = None
 
-        self.call_banner.start(peer_name, peer_id=peer_id)
-        self.voice_bar.set_channel("Direct Call", peer_name)
+        peer_info = self.users.get(peer_id, {})
+        peer_color = peer_info.get("avatar_color", "#5865F2")
+        peer_img = peer_info.get("avatar_image", "")
+        peer_dname = peer_info.get("display_name") or peer_name
+
+        my_user = {
+            "user_id": self.my_user_id,
+            "username": self.my_username,
+            "display_name": getattr(self, "my_display_name", self.my_username) or self.my_username,
+            "avatar_color": self.my_avatar_color,
+            "avatar_image": getattr(self, "my_avatar_image", ""),
+            "is_muted": self.user_panel.is_muted,
+            "is_deafened": self.user_panel.is_deafened
+        }
+        peer_user = {
+            "user_id": peer_id,
+            "username": peer_name,
+            "display_name": peer_dname,
+            "avatar_color": peer_color,
+            "avatar_image": peer_img,
+            "is_muted": peer_info.get("is_muted", False),
+            "is_deafened": peer_info.get("is_deafened", False)
+        }
+
+        # Keep in DM chat view (index 1) so 1/3 call widget + 2/3 chat is displayed
+        self._on_dm_user_selected(peer_id, peer_dname)
+        self.dm_call_widget.start_connected(my_user, peer_user)
+
+        self.voice_bar.set_channel("Direct Call", peer_dname)
         self.voice_bar.show()
-        self.main_stack.setCurrentIndex(2)
 
-        peer_color = "#5865F2"
-        if peer_id in self.users:
-            peer_color = self.users[peer_id].get("avatar_color", "#5865F2")
-
-        self.voice_view.set_channel_info(f"Direct Call: {peer_name}")
+        # Also update VoiceView stage with REAL avatars
+        self.voice_view.set_channel_info(f"Direct Call: {peer_dname}")
         self.voice_view.update_participants([
-            {"user_id": self.my_user_id, "username": self.my_username, "avatar_color": self.my_avatar_color},
-            {"user_id": peer_id, "username": peer_name, "avatar_color": peer_color}
+            {
+                "user_id": self.my_user_id,
+                "username": self.my_username,
+                "display_name": my_user["display_name"],
+                "avatar_color": self.my_avatar_color,
+                "avatar_image": my_user["avatar_image"],
+                "is_muted": self.user_panel.is_muted,
+                "is_deafened": self.user_panel.is_deafened
+            },
+            {
+                "user_id": peer_id,
+                "username": peer_name,
+                "display_name": peer_dname,
+                "avatar_color": peer_color,
+                "avatar_image": peer_img,
+                "is_muted": peer_info.get("is_muted", False),
+                "is_deafened": peer_info.get("is_deafened", False)
+            }
         ])
 
     def _on_toggle_voice_chat(self):
@@ -954,29 +1033,39 @@ class MainWindow(QMainWindow):
             self.main_stack.setCurrentIndex(2)
 
     def _on_call_volume_changed(self, vol: float):
-        if getattr(self.call_banner, "peer_id", None):
-            self.audio_manager.set_peer_volume(self.call_banner.peer_id, vol)
+        if getattr(self.dm_call_widget, "peer_id", None):
+            self.audio_manager.set_peer_volume(self.dm_call_widget.peer_id, vol)
 
     def _on_call_declined(self, call_id: str):
         self.audio_manager.stop_ringtone()
+        self.dm_call_widget.stop()
+        self.active_call_id = None
+        self.pending_call_peer_id = None
+        self.udp_voice.active_call_id = None
+        self.voice_bar.hide()
         QMessageBox.information(self, t("call_declined"), t("call_was_declined"))
 
     def _on_call_ended(self, call_id: str):
         self.audio_manager.stop_ringtone()
-        if self.active_call_id == call_id:
-            if self.screen_capturer.is_sharing:
-                self.screen_capturer.stop_sharing()
-            self.active_call_id = None
-            self.udp_voice.active_call_id = None
-            self.call_banner.stop()
-            self.voice_bar.hide()
-            self.voice_view.hide_screen_share()
-            self.audio_manager.clear_peers()
-            if self.main_stack.currentIndex() == 2:
-                self.main_stack.setCurrentIndex(1)
+        if self.screen_capturer.is_sharing:
+            self.screen_capturer.stop_sharing()
+        self.active_call_id = None
+        self.pending_call_peer_id = None
+        self.udp_voice.active_call_id = None
+        self.dm_call_widget.stop()
+        self.voice_bar.hide()
+        self.voice_view.hide_screen_share()
+        self.audio_manager.clear_peers()
+        if self.main_stack.currentIndex() == 2:
+            self.main_stack.setCurrentIndex(1)
 
     def _on_call_failed(self, reason: str):
         self.audio_manager.stop_ringtone()
+        self.dm_call_widget.stop()
+        self.active_call_id = None
+        self.pending_call_peer_id = None
+        self.udp_voice.active_call_id = None
+        self.voice_bar.hide()
         if "busy" in reason.lower() or "unavailable" in reason.lower():
             msg = t("user_busy")
         else:
@@ -984,18 +1073,24 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, t("call_failed"), msg)
 
     def _on_end_active_call(self):
+        self.audio_manager.stop_ringtone()
         if self.active_call_id:
             self.tcp_client.send_call_end(self.active_call_id)
-            if self.screen_capturer.is_sharing:
-                self.screen_capturer.stop_sharing()
-            self.active_call_id = None
-            self.udp_voice.active_call_id = None
-            self.call_banner.stop()
-            self.voice_bar.hide()
-            self.voice_view.hide_screen_share()
-            self.audio_manager.clear_peers()
-            if self.main_stack.currentIndex() == 2:
-                self.main_stack.setCurrentIndex(1)
+        elif getattr(self, "pending_call_peer_id", None):
+            self.pending_call_peer_id = None
+
+        if self.screen_capturer.is_sharing:
+            self.screen_capturer.stop_sharing()
+        self.active_call_id = None
+        self.pending_call_peer_id = None
+        self.udp_voice.active_call_id = None
+        self.dm_call_widget.stop()
+        self.voice_bar.hide()
+        self.voice_view.hide_screen_share()
+        self.audio_manager.clear_peers()
+        if self.main_stack.currentIndex() == 2:
+            self.main_stack.setCurrentIndex(1)
+
 
     # ------------------ Audio & Indicators ------------------
 
@@ -1003,11 +1098,15 @@ class MainWindow(QMainWindow):
         self.audio_manager.is_muted = is_muted
         self.audio_manager.play_mute_chime(is_muted)
         self.tcp_client.send_user_media_state(is_muted, self.user_panel.is_deafened)
+        if hasattr(self, "dm_call_widget"):
+            self.dm_call_widget.set_user_media_state(self.my_user_id, is_muted, self.user_panel.is_deafened)
 
     def _on_deafen_toggled(self, is_deafened: bool):
         self.audio_manager.is_deafened = is_deafened
         self.audio_manager.play_deafen_chime(is_deafened)
         self.tcp_client.send_user_media_state(self.user_panel.is_muted, is_deafened)
+        if hasattr(self, "dm_call_widget"):
+            self.dm_call_widget.set_user_media_state(self.my_user_id, self.user_panel.is_muted, is_deafened)
 
     def _on_user_media_state(self, update: Dict[str, Any]):
         uid = update.get("user_id")
@@ -1017,8 +1116,11 @@ class MainWindow(QMainWindow):
             self.users[uid]["is_muted"] = is_muted
             self.users[uid]["is_deafened"] = is_deaf
         self.voice_view.set_user_media_state(uid, is_muted, is_deaf)
+        if hasattr(self, "dm_call_widget"):
+            self.dm_call_widget.set_user_media_state(uid, is_muted, is_deaf)
         if self.current_room_id and self.current_room_id in self.rooms:
             self.channel_list.show_room_mode(self.rooms[self.current_room_id])
+
 
     def _save_local_profile(self):
         try:
@@ -1128,7 +1230,8 @@ class MainWindow(QMainWindow):
             if self.current_room_id and self.current_room_id in self.rooms:
                 self.channel_list.show_room_mode(self.rooms[self.current_room_id])
             else:
-                self.channel_list.show_dm_mode()
+                self.channel_list.show_dm_mode(list(self.users.values()))
+
         if hasattr(self, "chat_view"):
             if hasattr(self.chat_view, "msg_input"):
                 self.chat_view.msg_input.setPlaceholderText(t("send_message"))
@@ -1230,48 +1333,63 @@ class MainWindow(QMainWindow):
 
     def _on_peer_speaking(self, user_id: str, is_speaking: bool):
         self.voice_view.set_user_speaking(user_id, is_speaking)
+        if hasattr(self, "dm_call_widget"):
+            self.dm_call_widget.set_user_speaking(user_id, is_speaking)
         if user_id == self.my_user_id:
             self.user_panel.set_speaking(is_speaking)
 
+
     def _refresh_voice_stage_users(self):
-        if not self.current_voice_channel_id or not self.current_room_id:
+        if not self.current_voice_channel_id:
             return
-        room = self.rooms.get(self.current_room_id)
-        if not room:
-            return
-        
-        participants = []
-        for ch in room.get("channels", []):
-            if ch.get("channel_id") == self.current_voice_channel_id:
-                for uid in ch.get("voice_users", []):
-                    uname = uid
-                    color = "#5865F2"
-                    img = ""
-                    is_muted = False
-                    is_deaf = False
-                    if uid == self.my_user_id:
-                        uname = self.my_username
-                        color = self.my_avatar_color
-                        img = getattr(self, "my_avatar_image", "")
-                        is_muted = self.user_panel.is_muted
-                        is_deaf = self.user_panel.is_deafened
-                    elif uid in self.users:
-                        u = self.users[uid]
-                        uname = u.get("username", uid)
-                        color = u.get("avatar_color", "#5865F2")
-                        img = u.get("avatar_image", "")
-                        is_muted = u.get("is_muted", False)
-                        is_deaf = u.get("is_deafened", False)
-                    participants.append({
-                        "user_id": uid,
-                        "username": uname,
-                        "avatar_color": color,
-                        "avatar_image": img,
-                        "is_muted": is_muted,
-                        "is_deafened": is_deaf
-                    })
+
+        found_ch = None
+        for r in self.rooms.values():
+            for c in r.get("channels", []):
+                if c.get("channel_id") == self.current_voice_channel_id:
+                    found_ch = c
+                    break
+            if found_ch:
                 break
+
+        v_uids = list(found_ch.get("voice_users", [])) if found_ch else []
+        if self.my_user_id and self.my_user_id not in v_uids:
+            v_uids.append(self.my_user_id)
+
+        participants = []
+        for uid in v_uids:
+            uname = uid
+            dname = uid
+            color = "#5865F2"
+            img = ""
+            is_muted = False
+            is_deaf = False
+            if uid == self.my_user_id:
+                uname = self.my_username
+                dname = getattr(self, "my_display_name", self.my_username) or self.my_username
+                color = self.my_avatar_color
+                img = getattr(self, "my_avatar_image", "")
+                is_muted = self.user_panel.is_muted
+                is_deaf = self.user_panel.is_deafened
+            elif uid in self.users:
+                u = self.users[uid]
+                uname = u.get("username", uid)
+                dname = u.get("display_name") or uname
+                color = u.get("avatar_color", "#5865F2")
+                img = u.get("avatar_image", "")
+                is_muted = u.get("is_muted", False)
+                is_deaf = u.get("is_deafened", False)
+            participants.append({
+                "user_id": uid,
+                "username": uname,
+                "display_name": dname,
+                "avatar_color": color,
+                "avatar_image": img,
+                "is_muted": is_muted,
+                "is_deafened": is_deaf
+            })
         self.voice_view.update_participants(participants)
+
 
     # ------------------ Server Events ------------------
 

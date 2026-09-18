@@ -6,8 +6,9 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 )
-from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap, RoundAvatarWidget
 from vimcord.client.i18n import t
+
 
 
 class UserPanel(QWidget):
@@ -50,10 +51,10 @@ class UserPanel(QWidget):
         p_layout.setSpacing(6)
 
         # Avatar circle
-        self.avatar_label = QLabel()
-        self.avatar_label.setFixedSize(36, 36)
-        self.avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        p_layout.addWidget(self.avatar_label)
+        self.avatar_widget = RoundAvatarWidget(size=36, parent=profile_btn)
+        self.avatar_label = self.avatar_widget  # backwards compatibility
+        p_layout.addWidget(self.avatar_widget)
+
 
         # Username & status
         info_layout = QVBoxLayout()
@@ -136,27 +137,11 @@ class UserPanel(QWidget):
         self.status_text = status_text
         self.name_label.setText(self.display_name)
         self.status_label.setText(status_text or "Online")
-        pixmap = get_round_avatar_pixmap(36, self.display_name, avatar_color, avatar_image)
-        self.avatar_label.setPixmap(pixmap)
-        self.avatar_label.setStyleSheet("background: transparent; border: none;")
+        self.avatar_widget.set_user_data(self.display_name, avatar_color, avatar_image)
 
     def set_speaking(self, is_speaking: bool):
-        if is_speaking:
-            self.avatar_label.setStyleSheet("""
-                QLabel {
-                    border: 3px solid #23a55a;
-                    border-radius: 18px;
-                    background-color: transparent;
-                }
-            """)
-        else:
-            self.avatar_label.setStyleSheet("""
-                QLabel {
-                    border: 3px solid transparent;
-                    border-radius: 18px;
-                    background-color: transparent;
-                }
-            """)
+        self.avatar_widget.set_speaking(is_speaking)
+
 
     def _toggle_mic(self):
         self.is_muted = not self.is_muted

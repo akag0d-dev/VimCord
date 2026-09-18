@@ -148,6 +148,15 @@ class TCPServer:
                     # Return full initial state - send user's rooms (isolation)
                     friends = self.db.get_friends(current_user.user_id)
                     user_rooms = self.db.get_user_rooms(current_user.user_id)
+                    # Synchronize live in-memory voice_users into channel data
+                    for r in user_rooms:
+                        live_r = self.server_state.rooms.get(r.get("room_id"))
+                        for c in r.get("channels", []):
+                            if live_r and c.get("channel_id") in live_r.channels:
+                                c["voice_users"] = list(live_r.channels[c["channel_id"]].voice_users)
+                            else:
+                                c.setdefault("voice_users", [])
+
                     resp = {
                         "type": "login_resp",
                         "success": True,
@@ -166,6 +175,7 @@ class TCPServer:
                     }
                     writer.write(encode_json_message(resp))
                     await writer.drain()
+
 
                     # Notify all other clients of user presence
                     await self.broadcast({

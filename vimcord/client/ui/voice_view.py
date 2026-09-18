@@ -13,8 +13,9 @@ from PyQt6.QtWidgets import (
 )
 
 
-from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap
+from vimcord.client.ui.avatar_helper import get_round_avatar_pixmap, RoundAvatarWidget
 from vimcord.client.i18n import t
+
 
 
 class VoiceUserWidget(QWidget):
@@ -45,11 +46,10 @@ class VoiceUserWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Avatar circle
-        self.avatar = QLabel()
-        self.avatar.setFixedSize(58, 58)
-        self.avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._set_avatar_style(speaking=False)
-        layout.addWidget(self.avatar)
+        self.avatar_widget = RoundAvatarWidget(size=64, parent=self)
+        self.avatar_widget.set_user_data(self.display_name, self.avatar_color, self.avatar_image)
+        self.avatar = self.avatar_widget  # backwards compatibility
+        layout.addWidget(self.avatar_widget)
 
         # Username + media icon row
         name_row = QHBoxLayout()
@@ -86,29 +86,14 @@ class VoiceUserWidget(QWidget):
             self.badge_label.hide()
 
     def _set_avatar_style(self, speaking: bool):
-        pixmap = get_round_avatar_pixmap(54, self.display_name, self.avatar_color, self.avatar_image)
-        self.avatar.setPixmap(pixmap)
-        if speaking:
-            self.avatar.setStyleSheet("""
-                QLabel {
-                    border: 3px solid #23a55a;
-                    border-radius: 29px;
-                    background-color: transparent;
-                }
-            """)
-        else:
-            self.avatar.setStyleSheet("""
-                QLabel {
-                    border: 3px solid transparent;
-                    border-radius: 29px;
-                    background-color: transparent;
-                }
-            """)
+        self.avatar_widget.set_user_data(self.display_name, self.avatar_color, self.avatar_image)
+        self.avatar_widget.set_speaking(speaking)
 
     def set_speaking(self, speaking: bool):
         if self.is_speaking != speaking:
             self.is_speaking = speaking
-            self._set_avatar_style(speaking)
+            self.avatar_widget.set_speaking(speaking)
+
 
     def set_media_state(self, is_muted: bool, is_deafened: bool, is_locally_muted: bool = False):
         self.is_muted = is_muted
@@ -167,7 +152,16 @@ class VoiceView(QWidget):
 
         self._init_ui()
 
+    @property
+    def is_sharing(self) -> bool:
+        return getattr(self, "is_screen_sharing", False)
+
+    @property
+    def is_watching(self) -> bool:
+        return getattr(self, "is_watching_stream", True)
+
     def set_current_user_id(self, user_id: str):
+
         self.current_user_id = user_id
 
     def _init_ui(self):
@@ -562,7 +556,17 @@ class VoiceView(QWidget):
             if not self.screen_container.isVisible():
                 self.screen_container.show()
 
+    def show_local_stream_active(self, streamer_name: str = "You"):
+        """Displays friendly non-mirror placeholder when user shares their own screen."""
+        self.screen_title.setText(f"🖥️ {streamer_name} are sharing your screen")
+        self.screen_display.clear()
+        self.screen_display.setText("🖥️ You are streaming your screen\n(Live video preview disabled to prevent infinite mirror loop)")
+        self.screen_display.setStyleSheet("background-color: #111214; color: #23a55a; font-size: 14px; font-weight: bold; border-radius: 6px;")
+        if not self.screen_container.isVisible():
+            self.screen_container.show()
+
     def hide_screen_share(self):
         self.screen_container.hide()
         self.screen_display.clear()
         self.last_jpeg_data = None
+

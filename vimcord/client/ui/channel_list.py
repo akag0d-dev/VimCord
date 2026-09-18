@@ -134,15 +134,17 @@ class ChannelListWidget(QWidget):
     def set_my_user_id(self, user_id: str):
         self.my_user_id = user_id
 
-    def show_dm_mode(self, users: List[Dict[str, Any]]):
+    def show_dm_mode(self, users: Optional[List[Dict[str, Any]]] = None):
         self.current_mode = "@me"
-        self.current_users_list = users
-        self.header_title.setText("Direct Messages")
+        if users is not None:
+            self.current_users_list = users
+        self.header_title.setText(t("direct_messages"))
         self.invite_btn.hide()
         self.add_ch_btn.hide()
         self.leave_room_btn.hide()
         self.del_room_btn.hide()
         self._render_dm_list()
+
 
     def show_room_mode(self, room: Dict[str, Any]):
         self.current_mode = room.get("room_id")
