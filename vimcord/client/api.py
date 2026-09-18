@@ -15,86 +15,86 @@ from typing import Dict, Any, Optional, List
 from PIL import ImageGrab
 
 from vimcord.client.audio.audio_manager import AudioManager
-from vimcord.client.config import load_config, save_config, get_resource_path
+from vimcord.client.config import load_config, save_config, clear_auto_login, get_resource_path
 from vimcord.client.i18n import set_language, get_language, t
 from vimcord.client.input.global_hotkey import GlobalHotkeyManager
 from vimcord.client.network.tcp_client import TCPClient
 from vimcord.client.network.udp_voice import UDPVoiceClient
 from vimcord.client.tray.tray_manager import TrayManager
 from vimcord.client.video.screen_share import ScreenCapturer
-from vimcord.common.protocol import DEFAULT_TCP_PORT, DEFAULT_UDP_PORT
+from vimcord.common.protocol import DEFAULT_HOST, DEFAULT_TCP_PORT, DEFAULT_UDP_PORT
 
 logger = logging.getLogger("VimCord.API")
 
 
 class VimCordAPI:
     def __init__(self, window=None):
-        self.window = window
-        self.config = load_config()
-        set_language(self.config.get("language", "en"))
+        self._window = window
+        self._config = load_config()
+        set_language(self._config.get("language", "en"))
 
-        # Core subsystems
-        self.audio_manager = AudioManager()
-        self.tcp_client = TCPClient()
-        self.udp_voice = UDPVoiceClient(self.audio_manager)
-        self.screen_capturer = ScreenCapturer(send_func=self.udp_voice.send_screen_packet)
-        self.screen_capturer.on_frame_ready = self._on_screen_frame_captured
+        # Core subsystems (prefixed with _ so pywebview's get_functions does not inspect them recursively)
+        self._audio_manager = AudioManager()
+        self._tcp_client = TCPClient()
+        self._udp_voice = UDPVoiceClient(self._audio_manager)
+        self._screen_capturer = ScreenCapturer(send_func=self._udp_voice.send_screen_packet)
+        self._screen_capturer.on_frame_ready = self._on_screen_frame_captured
 
         # State tracking
-        self.my_user_id: str = ""
-        self.my_username: str = ""
-        self.my_display_name: str = ""
-        self.my_avatar_color: str = "#5865F2"
-        self.my_avatar_image: str = ""
-        self.server_host: str = self.config.get("host", "127.0.0.1")
-        self.server_tcp_port: int = self.config.get("tcp_port", DEFAULT_TCP_PORT)
-        self.server_udp_port: int = self.config.get("udp_port", DEFAULT_UDP_PORT)
+        self._my_user_id: str = ""
+        self._my_username: str = ""
+        self._my_display_name: str = ""
+        self._my_avatar_color: str = "#5865F2"
+        self._my_avatar_image: str = ""
+        self._server_host: str = self._config.get("host", DEFAULT_HOST) or DEFAULT_HOST
+        self._server_tcp_port: int = self._config.get("tcp_port", DEFAULT_TCP_PORT) or DEFAULT_TCP_PORT
+        self._server_udp_port: int = self._config.get("udp_port", DEFAULT_UDP_PORT) or DEFAULT_UDP_PORT
 
-        self.current_room_id: Optional[str] = None
-        self.current_channel_id: Optional[str] = None
-        self.current_dm_peer_id: Optional[str] = None
-        self.current_voice_channel_id: Optional[str] = None
-        self.active_call_id: Optional[str] = None
-        self.is_muted: bool = False
-        self.is_deafened: bool = False
+        self._current_room_id: Optional[str] = None
+        self._current_channel_id: Optional[str] = None
+        self._current_dm_peer_id: Optional[str] = None
+        self._current_voice_channel_id: Optional[str] = None
+        self._active_call_id: Optional[str] = None
+        self._is_muted: bool = False
+        self._is_deafened: bool = False
 
         # Ping monitor
         self._ping_thread: Optional[threading.Thread] = None
         self._is_pinging: bool = False
 
         # Global Hotkey (PTT)
-        self.hotkey_mgr = GlobalHotkeyManager(on_ptt_state_changed=self._on_ptt_state_changed)
-        ptt_enabled = self.config.get("ptt_mode", False)
-        ptt_key = self.config.get("ptt_key", "Space")
-        self.audio_manager.set_ptt_mode(ptt_enabled)
-        self.hotkey_mgr.set_ptt_config(ptt_enabled, ptt_key)
-        self.hotkey_mgr.start()
+        self._hotkey_mgr = GlobalHotkeyManager(on_ptt_state_changed=self._on_ptt_state_changed)
+        ptt_enabled = self._config.get("ptt_mode", False)
+        ptt_key = self._config.get("ptt_key", "Space")
+        self._audio_manager.set_ptt_mode(ptt_enabled)
+        self._hotkey_mgr.set_ptt_config(ptt_enabled, ptt_key)
+        self._hotkey_mgr.start()
 
         # Tray Manager
-        self.tray = TrayManager(on_open=self._on_tray_open, on_quit=self.quit_app)
-        self.tray.start()
+        self._tray = TrayManager(on_open=self._on_tray_open, on_quit=self.quit_app)
+        self._tray.start()
 
         # Hook audio events
-        self.audio_manager.on_speaking_changed = self._on_local_speaking_changed
+        self._audio_manager.on_speaking_changed = self._on_local_speaking_changed
 
         # Hook network events
         self._bind_network_signals()
 
     def set_window(self, window):
-        self.window = window
+        self._window = window
 
     def dispatch_event(self, event_name: str, payload: Any = None):
         """Sends an event asynchronously to JavaScript on the main window."""
-        if not self.window:
+        if not self._window:
             return
         try:
             js = f"window.onVimCordEvent({json.dumps(event_name)}, {json.dumps(payload)});"
-            self.window.evaluate_js(js)
+            self._window.evaluate_js(js)
         except Exception as e:
             logger.debug(f"Failed to dispatch event {event_name}: {e}")
 
     def _bind_network_signals(self):
-        s = self.tcp_client.signals
+        s = self._tcp_client.signals
         s.connected.connect(lambda: self.dispatch_event("connected"))
         s.disconnected.connect(lambda: self.dispatch_event("disconnected"))
         s.error.connect(lambda msg: self.dispatch_event("network_error", msg))
@@ -132,10 +132,10 @@ class VimCordAPI:
         # Screen sharing
         s.screen_frame.connect(lambda sid, b: self._on_received_screen_frame(sid, b))
         s.screen_stop.connect(lambda sid: self.dispatch_event("screen_stop", {"sender_id": sid}))
-        self.udp_voice.signals.screen_frame_received.connect(lambda sid, b: self._on_received_screen_frame(sid, b))
+        self._udp_voice.signals.screen_frame_received.connect(lambda sid, b: self._on_received_screen_frame(sid, b))
 
         # UDP Voice speaking
-        self.udp_voice.signals.peer_speaking.connect(lambda uid, spk: self.dispatch_event("peer_speaking", {"user_id": uid, "is_speaking": spk}))
+        self._udp_voice.signals.peer_speaking.connect(lambda uid, spk: self.dispatch_event("peer_speaking", {"user_id": uid, "is_speaking": spk}))
 
     # ---------------- UI & Window Actions ----------------
 
@@ -147,68 +147,86 @@ class VimCordAPI:
             "language": get_language(),
             "audio_devices": self.get_audio_devices(),
             "theme": cfg.get("theme", "dark"),
-            "ptt_mode": self.audio_manager.ptt_mode,
-            "ptt_key": getattr(self.hotkey_mgr, "ptt_key", "Space"),
+            "ptt_mode": self._audio_manager.ptt_mode,
+            "ptt_key": getattr(self._hotkey_mgr, "ptt_key", "Space"),
             "auto_login": cfg.get("auto_login", False),
             "saved_username": cfg.get("username", "") or cfg.get("saved_username", ""),
             "saved_password": cfg.get("saved_password", "") if cfg.get("auto_login") else ""
         }
 
     def minimize_window(self):
-        if self.window:
-            self.window.minimize()
+        if self._window:
+            self._window.minimize()
 
     def toggle_maximize_window(self):
-        if self.window:
-            self.window.toggle_fullscreen()
+        if self._window:
+            self._window.toggle_fullscreen()
 
     def close_window(self):
         """Minimize window to tray on close button click."""
-        if self.window:
-            self.window.hide()
+        if self._window:
+            self._window.hide()
+
+    def set_window_size(self, width: int, height: int):
+        self._resize_window(width, height)
+
+    def _resize_window(self, width: int, height: int):
+        if not self._window:
+            return
+        try:
+            self._window.resize(width, height)
+            import webview
+            screens = webview.screens
+            if screens:
+                s = screens[0]
+                x = max(0, (s.width - width) // 2)
+                y = max(0, (s.height - height) // 2)
+                self._window.move(x, y)
+        except Exception as e:
+            logger.debug(f"Failed to resize window: {e}")
 
     def quit_app(self):
         """Completely terminates VimCord and cleans up all background threads."""
-        self.hotkey_mgr.stop()
-        self.tray.stop()
-        self.screen_capturer.stop_sharing()
-        if self.current_voice_channel_id:
+        self._hotkey_mgr.stop()
+        self._tray.stop()
+        self._screen_capturer.stop_sharing()
+        if self._current_voice_channel_id:
             try:
-                self.tcp_client.send_leave_voice()
+                self._tcp_client.send_leave_voice()
             except Exception:
                 pass
-        if self.active_call_id:
+        if self._active_call_id:
             try:
-                self.tcp_client.send_call_end(self.active_call_id)
+                self._tcp_client.send_call_end(self._active_call_id)
             except Exception:
                 pass
-        self.tcp_client.disconnect()
-        self.udp_voice.stop()
-        self.audio_manager.stop()
-        if self.window:
+        self._tcp_client.disconnect()
+        self._udp_voice.stop()
+        self._audio_manager.stop()
+        if self._window:
             try:
-                self.window.destroy()
+                self._window.destroy()
             except Exception:
                 pass
         os._exit(0)
 
     def _on_tray_open(self):
-        if self.window:
-            self.window.show()
-            self.window.restore()
+        if self._window:
+            self._window.show()
+            self._window.restore()
 
     # ---------------- Auth & Connection ----------------
 
     def login(self, username: str, password: str = "", host: str = "", tcp_port: int = 0, udp_port: int = 0, auto_login: bool = False):
-        self.server_host = host or self.server_host
-        self.server_tcp_port = tcp_port or self.server_tcp_port
-        self.server_udp_port = udp_port or self.server_udp_port
+        self._server_host = host or self._server_host or DEFAULT_HOST
+        self._server_tcp_port = tcp_port or self._server_tcp_port or DEFAULT_TCP_PORT
+        self._server_udp_port = udp_port or self._server_udp_port or DEFAULT_UDP_PORT
 
         # Update saved connection config
         cfg_updates = {
-            "host": self.server_host,
-            "tcp_port": self.server_tcp_port,
-            "udp_port": self.server_udp_port,
+            "host": self._server_host,
+            "tcp_port": self._server_tcp_port,
+            "udp_port": self._server_udp_port,
             "username": username,
             "auto_login": auto_login
         }
@@ -216,43 +234,65 @@ class VimCordAPI:
             cfg_updates["saved_password"] = password
         save_config(cfg_updates)
 
-        if not self.tcp_client.sock or not self.tcp_client._is_running:
-            self.tcp_client.disconnect()
-            ok = self.tcp_client.connect_to_server(self.server_host, self.server_tcp_port)
+        if not self._tcp_client.sock or not self._tcp_client._is_running:
+            self._tcp_client.disconnect()
+            ok = self._tcp_client.connect_to_server(self._server_host, self._server_tcp_port)
             if not ok:
-                return {"success": False, "message": f"Could not connect to server at {self.server_host}:{self.server_tcp_port}"}
+                return {"success": False, "message": f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"}
 
-        self.tcp_client.send_login(username, password)
+        self._tcp_client.send_login(username, password)
         return {"success": True, "pending": True}
 
     def register(self, username: str, password: str = "", host: str = "", tcp_port: int = 0, udp_port: int = 0):
-        self.server_host = host or self.server_host
-        self.server_tcp_port = tcp_port or self.server_tcp_port
-        self.server_udp_port = udp_port or self.server_udp_port
+        self._server_host = host or self._server_host or DEFAULT_HOST
+        self._server_tcp_port = tcp_port or self._server_tcp_port or DEFAULT_TCP_PORT
+        self._server_udp_port = udp_port or self._server_udp_port or DEFAULT_UDP_PORT
 
-        if not self.tcp_client.sock or not self.tcp_client._is_running:
-            self.tcp_client.disconnect()
-            ok = self.tcp_client.connect_to_server(self.server_host, self.server_tcp_port)
+        if not self._tcp_client.sock or not self._tcp_client._is_running:
+            self._tcp_client.disconnect()
+            ok = self._tcp_client.connect_to_server(self._server_host, self._server_tcp_port)
             if not ok:
-                return {"success": False, "message": f"Could not connect to server at {self.server_host}:{self.server_tcp_port}"}
+                return {"success": False, "message": f"Could not connect to server at {self._server_host}:{self._server_tcp_port}"}
 
-        self.tcp_client.send_register(username, password)
+        self._tcp_client.send_register(username, password)
         return {"success": True, "pending": True}
+
+    def logout(self):
+        """Logs out of current session, clears auto_login, and resets window size to login size."""
+        clear_auto_login()
+        if self._current_voice_channel_id:
+            try:
+                self._tcp_client.send_leave_voice()
+            except Exception:
+                pass
+        if self._active_call_id:
+            try:
+                self._tcp_client.send_call_end(self._active_call_id)
+            except Exception:
+                pass
+        self._is_pinging = False
+        self._tcp_client.disconnect()
+        self._udp_voice.stop()
+        self._audio_manager.stop()
+        self._resize_window(460, 620)
 
     def _on_login_response(self, ok: bool, data: dict):
         if ok:
-            self.my_user_id = data.get("user_id", "")
-            self.my_username = data.get("username", "")
-            self.my_display_name = data.get("display_name", "") or self.my_username
-            self.my_avatar_color = data.get("avatar_color", "#5865F2")
-            self.my_avatar_image = data.get("avatar_image", "")
+            self._my_user_id = data.get("user_id", "")
+            self._my_username = data.get("username", "")
+            self._my_display_name = data.get("display_name", "") or self._my_username
+            self._my_avatar_color = data.get("avatar_color", "#5865F2")
+            self._my_avatar_image = data.get("avatar_image", "")
 
             # Start audio subsystems
-            self.audio_manager.start()
-            self.udp_voice.start(self.my_user_id, self.server_host, self.server_udp_port)
+            self._audio_manager.start()
+            self._udp_voice.start(self._my_user_id, self._server_host, self._server_udp_port)
 
             # Start ping loop
             self._start_ping_loop()
+
+            # Expand window to full Discord workspace
+            self._resize_window(1280, 800)
 
         self.dispatch_event("login_response", {"success": ok, "data": data})
 
@@ -263,9 +303,9 @@ class VimCordAPI:
 
         def loop():
             while self._is_pinging:
-                if self.tcp_client.sock and self.tcp_client._is_running:
+                if self._tcp_client.sock and self._tcp_client._is_running:
                     try:
-                        self.tcp_client.send_ping(time.time())
+                        self._tcp_client.send_ping(time.time())
                     except Exception:
                         pass
                 time.sleep(3.0)
@@ -283,17 +323,14 @@ class VimCordAPI:
                           image_data: str = "", voice_data: str = "", voice_duration: float = 0.0,
                           file_data: str = "", file_name: str = "", file_size: int = 0):
         """Sends a message asynchronously in a background thread to prevent any UI freezing."""
-        msg_id = "msg-" + uuid.uuid4().hex[:12]
+        msg_id = f"m-{uuid.uuid4().hex[:8]}"
 
         local_msg = {
             "msg_id": msg_id,
+            "sender_id": self._my_user_id,
+            "sender_name": self._my_display_name or self._my_username,
             "target_type": target_type,
             "target_id": target_id,
-            "sender_id": self.my_user_id,
-            "sender_name": self.my_username,
-            "display_name": self.my_display_name,
-            "avatar_color": self.my_avatar_color,
-            "avatar_image": self.my_avatar_image,
             "content": content,
             "image_data": image_data,
             "voice_data": voice_data,
@@ -306,7 +343,7 @@ class VimCordAPI:
         }
 
         # Send through TCPClient with async background socket write
-        self.tcp_client.send_chat_message(
+        self._tcp_client.send_chat_message(
             target_type=target_type,
             target_id=target_id,
             content=content,
@@ -322,23 +359,23 @@ class VimCordAPI:
         return local_msg
 
     def delete_message(self, msg_id: str, target_type: str, target_id: str):
-        self.tcp_client.send_delete_message(msg_id, target_type, target_id)
+        self._tcp_client.send_delete_message(msg_id, target_type, target_id)
 
     def get_history(self, target_type: str, target_id: str):
-        self.tcp_client.send_get_history(target_type, target_id)
+        self._tcp_client.send_get_history(target_type, target_id)
 
     def _on_incoming_chat_message(self, msg: Dict[str, Any]):
         sender_id = msg.get("sender_id")
-        if sender_id != self.my_user_id:
-            self.audio_manager.play_message_chime()
+        if sender_id != self._my_user_id:
+            self._audio_manager.play_message_chime()
         self.dispatch_event("chat_message", msg)
 
     def open_file_dialog(self) -> Optional[Dict[str, Any]]:
         """Opens native file chooser dialog via pywebview."""
-        if not self.window:
+        if not self._window:
             return None
         import webview
-        files = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False)
+        files = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False)
         if not files or not len(files):
             return None
         file_path = files[0]
@@ -411,61 +448,63 @@ class VimCordAPI:
     # ---------------- Voice Recording & Playback ----------------
 
     def start_voice_record(self):
-        self.audio_manager.start_recording_voice_msg()
+        self._audio_manager.start_recording_voice_msg()
 
     def stop_voice_record(self) -> Dict[str, Any]:
-        b64, dur = self.audio_manager.stop_recording_voice_msg()
+        b64, dur = self._audio_manager.stop_recording_voice_msg()
         return {"data": b64, "duration": dur}
 
     def play_voice_message(self, voice_data: str, duration: float = 0.0):
-        self.audio_manager.play_voice_msg(voice_data, duration)
+        self._audio_manager.play_voice_msg(voice_data, duration)
 
     # ---------------- Direct Calls & Voice Channels ----------------
 
     def join_voice(self, room_id: str, channel_id: str):
-        self.current_voice_channel_id = channel_id
-        self.udp_voice.current_channel_id = channel_id
-        self.tcp_client.send_join_voice(room_id, channel_id)
-        self.audio_manager.play_join_chime()
+        self._current_voice_channel_id = channel_id
+        self._udp_voice.current_channel_id = channel_id
+        self._tcp_client.send_join_voice(room_id, channel_id)
+        self._audio_manager.play_join_chime()
 
     def leave_voice(self):
-        if self.screen_capturer.is_sharing:
-            self.screen_capturer.stop_sharing()
-        if self.active_call_id:
+        if self._screen_capturer.is_sharing:
+            self._screen_capturer.stop_sharing()
+        if self._active_call_id:
             self.end_call()
-        if self.current_voice_channel_id:
-            self.tcp_client.send_leave_voice()
-            self.current_voice_channel_id = None
-            self.udp_voice.current_channel_id = None
-            self.audio_manager.clear_peers()
-            self.audio_manager.play_leave_chime()
-            self.tray.update_speaking(False)
+        if self._current_voice_channel_id:
+            self._tcp_client.send_leave_voice()
+            self._current_voice_channel_id = None
+            self._udp_voice.current_channel_id = None
+            self._audio_manager.clear_peers()
+            self._audio_manager.play_leave_chime()
+            self._tray.update_speaking(False)
 
     def start_call(self, target_user_id: str):
-        self.audio_manager.start_ringtone("outgoing")
-        self.tcp_client.send_call_start(target_user_id)
+        self._audio_manager.start_ringtone("outgoing")
+        self._tcp_client.send_call_start(target_user_id)
 
     def accept_call(self, call_id: str):
-        self.audio_manager.stop_ringtone()
-        self.active_call_id = call_id
-        self.udp_voice.active_call_id = call_id
-        self.tcp_client.send_call_accept(call_id)
+        self._audio_manager.stop_ringtone()
+        self._active_call_id = call_id
+        self._udp_voice.current_channel_id = call_id
+        self._tcp_client.send_call_accept(call_id)
 
     def decline_call(self, call_id: str):
-        self.audio_manager.stop_ringtone()
-        self.tcp_client.send_call_decline(call_id)
+        self._audio_manager.stop_ringtone()
+        self._tcp_client.send_call_decline(call_id)
 
     def end_call(self):
-        self.audio_manager.stop_ringtone()
-        if self.active_call_id:
-            self.tcp_client.send_call_end(self.active_call_id)
-            self.active_call_id = None
-            self.udp_voice.active_call_id = None
-        self.audio_manager.clear_peers()
-        self.tray.update_speaking(False)
+        self._audio_manager.stop_ringtone()
+        if self._active_call_id:
+            self._tcp_client.send_call_end(self._active_call_id)
+            self._active_call_id = None
+            self._udp_voice.current_channel_id = None
+            self._audio_manager.clear_peers()
+            self._tray.update_speaking(False)
+            self.dispatch_event("call_ended", {"call_id": None})
 
     def _on_incoming_call(self, call_id: str, from_user_id: str, from_username: str):
-        self.audio_manager.start_ringtone("incoming")
+        self._active_call_id = call_id
+        self._audio_manager.start_ringtone("incoming")
         self.dispatch_event("incoming_call", {
             "call_id": call_id,
             "from_user_id": from_user_id,
@@ -473,9 +512,9 @@ class VimCordAPI:
         })
 
     def _on_call_accepted(self, call_id: str, peer_id: str, peer_name: str):
-        self.audio_manager.stop_ringtone()
-        self.active_call_id = call_id
-        self.udp_voice.active_call_id = call_id
+        self._audio_manager.stop_ringtone()
+        self._active_call_id = call_id
+        self._udp_voice.current_channel_id = call_id
         self.dispatch_event("call_accepted", {
             "call_id": call_id,
             "peer_id": peer_id,
@@ -483,57 +522,56 @@ class VimCordAPI:
         })
 
     def _on_call_declined(self, call_id: str):
-        self.audio_manager.stop_ringtone()
-        self.active_call_id = None
-        self.udp_voice.active_call_id = None
+        self._audio_manager.stop_ringtone()
+        self._active_call_id = None
+        self._udp_voice.current_channel_id = None
         self.dispatch_event("call_declined", {"call_id": call_id})
 
     def _on_call_ended(self, call_id: str):
-        self.audio_manager.stop_ringtone()
-        self.active_call_id = None
-        self.udp_voice.active_call_id = None
-        self.audio_manager.clear_peers()
+        self._audio_manager.stop_ringtone()
+        self._active_call_id = None
+        self._udp_voice.current_channel_id = None
+        self._audio_manager.clear_peers()
+        self._tray.update_speaking(False)
         self.dispatch_event("call_ended", {"call_id": call_id})
 
     def _on_call_failed(self, reason: str):
-        self.audio_manager.stop_ringtone()
-        self.active_call_id = None
-        self.udp_voice.active_call_id = None
+        self._audio_manager.stop_ringtone()
+        self._active_call_id = None
+        self._udp_voice.current_channel_id = None
         self.dispatch_event("call_failed", {"reason": reason})
 
+    # ---------------- Audio & Settings ----------------
+
     def set_mic_muted(self, muted: bool):
-        self.is_muted = muted
-        self.audio_manager.is_muted = muted
-        self.audio_manager.play_mute_chime(muted)
-        self.tcp_client.send_user_media_state(muted, self.is_deafened)
+        self._is_muted = muted
+        self._audio_manager.set_muted(muted)
+        self._tcp_client.send_user_media_state(muted, self._is_deafened)
 
     def set_deafened(self, deafened: bool):
-        self.is_deafened = deafened
-        self.audio_manager.is_deafened = deafened
-        self.audio_manager.play_deafen_chime(deafened)
-        self.tcp_client.send_user_media_state(self.is_muted, deafened)
+        self._is_deafened = deafened
+        self._audio_manager.set_deafened(deafened)
+        self._tcp_client.send_user_media_state(self._is_muted, deafened)
 
     def set_peer_volume(self, peer_id: str, volume: float):
-        self.audio_manager.set_peer_volume(peer_id, volume)
+        self._audio_manager.set_peer_volume(peer_id, volume)
 
     def set_peer_muted(self, peer_id: str, muted: bool):
-        self.audio_manager.set_peer_muted(peer_id, muted)
+        self._audio_manager.set_peer_muted(peer_id, muted)
 
     # ---------------- Screen Sharing ----------------
 
     def start_screen_share(self, target_type: str, target_id: str):
-        self.screen_capturer.start_sharing(self.my_user_id, target_id, target_type)
+        self._screen_capturer.start_sharing(target_type, target_id)
 
     def stop_screen_share(self, target_type: str = "channel", target_id: str = ""):
-        self.screen_capturer.stop_sharing()
-        try:
-            self.tcp_client.send_screen_stop(target_type, target_id)
-        except Exception:
-            pass
+        self._screen_capturer.stop_sharing()
+        if self._udp_voice:
+            self._udp_voice.stop_screen_share()
+        if target_id:
+            self._tcp_client.send_screen_stop(target_type, target_id)
 
     def _on_screen_frame_captured(self, target_type: str, target_id: str, jpeg_data: bytes):
-        # Transmit via UDP chunking and display local stream preview
-        self.udp_voice.send_screen_frame_chunks(target_id, jpeg_data)
         b64 = base64.b64encode(jpeg_data).decode("ascii")
         self.dispatch_event("local_screen_frame", {"frame": b64})
 
@@ -541,32 +579,32 @@ class VimCordAPI:
         b64 = base64.b64encode(jpeg_bytes).decode("ascii")
         self.dispatch_event("screen_frame", {"sender_id": sender_id, "frame": b64})
 
-    # ---------------- Settings, Devices & PTT ----------------
+    # ---------------- Audio Subsystems & Devices ----------------
 
     def get_audio_devices(self) -> Dict[str, Any]:
-        return self.audio_manager.get_available_devices()
+        return self._audio_manager.get_available_devices()
 
     def set_audio_devices(self, input_device: Optional[int], output_device: Optional[int]):
-        self.audio_manager.set_input_device(input_device)
-        self.audio_manager.set_output_device(output_device)
+        self._audio_manager.set_input_device(input_device)
+        self._audio_manager.set_output_device(output_device)
 
     def set_ptt_config(self, enabled: bool, hotkey: str):
-        self.audio_manager.set_ptt_mode(enabled)
-        self.hotkey_mgr.set_ptt_config(enabled, hotkey)
+        self._audio_manager.set_ptt_mode(enabled)
+        self._hotkey_mgr.set_ptt_config(enabled, hotkey)
         save_config({"ptt_mode": enabled, "ptt_key": hotkey})
 
     def record_keybind_start(self):
         def on_captured(key_name: str):
             self.set_ptt_config(True, key_name)
             self.dispatch_event("keybind_captured", {"key": key_name})
-        self.hotkey_mgr.start_recording(on_captured)
+        self._hotkey_mgr.start_recording(on_captured)
 
     def _on_ptt_state_changed(self, is_active: bool):
-        self.audio_manager.set_ptt_active(is_active)
+        self._audio_manager.set_ptt_active(is_active)
         self.dispatch_event("ptt_active_changed", {"active": is_active})
 
     def _on_local_speaking_changed(self, is_speaking: bool):
-        self.tray.update_speaking(is_speaking)
+        self._tray.update_speaking(is_speaking)
         self.dispatch_event("local_speaking", {"is_speaking": is_speaking})
 
     def set_theme(self, theme_name: str):
@@ -575,16 +613,16 @@ class VimCordAPI:
     def set_language(self, lang: str):
         set_language(lang)
         save_config({"language": lang})
-        self.tray.update_language()
+        self._tray.update_language()
         self.dispatch_event("language_changed", {"language": lang})
 
     def update_profile(self, display_name: str = "", status_text: str = "",
                        avatar_color: str = "", banner_color: str = "",
                        avatar_image: str = "", banner_image: str = "", bio: str = ""):
-        self.my_display_name = display_name or self.my_display_name
-        self.my_avatar_color = avatar_color or self.my_avatar_color
-        self.my_avatar_image = avatar_image or self.my_avatar_image
-        self.tcp_client.send_update_profile(
+        self._my_display_name = display_name or self._my_display_name
+        self._my_avatar_color = avatar_color or self._my_avatar_color
+        self._my_avatar_image = avatar_image or self._my_avatar_image
+        self._tcp_client.send_update_profile(
             display_name=display_name,
             status_text=status_text,
             avatar_color=avatar_color,
@@ -595,42 +633,42 @@ class VimCordAPI:
         )
 
     def change_password(self, old_pass: str, new_pass: str):
-        self.tcp_client.send_change_password(old_pass, new_pass)
+        self._tcp_client.send_change_password(old_pass, new_pass)
 
     # ---------------- Server & Room Navigation ----------------
 
     def create_room(self, name: str):
-        self.tcp_client.send_create_room(name)
+        self._tcp_client.send_create_room(name)
 
     def delete_room(self, room_id: str):
-        self.tcp_client.send_delete_room(room_id)
+        self._tcp_client.send_delete_room(room_id)
 
     def leave_room(self, room_id: str):
-        self.tcp_client.send_leave_room(room_id)
+        self._tcp_client.send_leave_room(room_id)
 
     def create_channel(self, room_id: str, name: str, channel_type: str = "text"):
-        self.tcp_client.send_create_channel(room_id, name, channel_type)
+        self._tcp_client.send_create_channel(room_id, name, channel_type)
 
     def rename_channel(self, room_id: str, channel_id: str, name: str):
-        self.tcp_client.send_rename_channel(room_id, channel_id, name)
+        self._tcp_client.send_rename_channel(room_id, channel_id, name)
 
     def delete_channel(self, room_id: str, channel_id: str):
-        self.tcp_client.send_delete_channel(room_id, channel_id)
+        self._tcp_client.send_delete_channel(room_id, channel_id)
 
     def create_room_invite(self, room_id: str):
-        self.tcp_client.send_create_room_invite(room_id)
+        self._tcp_client.send_create_room_invite(room_id)
 
     def join_room_by_invite(self, code: str):
-        self.tcp_client.send_join_room_by_invite(code)
+        self._tcp_client.send_join_room_by_invite(code)
 
     def get_room_members(self, room_id: str):
-        self.tcp_client.send_get_room_members(room_id)
+        self._tcp_client.send_get_room_members(room_id)
 
     def send_friend_request(self, username: str):
-        self.tcp_client.send_friend_request(username)
+        self._tcp_client.send_friend_request(username)
 
     def accept_friend_request(self, sender_id: str):
-        self.tcp_client.send_accept_friend_request(sender_id)
+        self._tcp_client.send_accept_friend_request(sender_id)
 
     def decline_friend_request(self, peer_id: str):
-        self.tcp_client.send_decline_friend_request(peer_id)
+        self._tcp_client.send_decline_friend_request(peer_id)

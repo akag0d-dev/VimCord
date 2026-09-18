@@ -452,6 +452,8 @@ class AudioManager:
             logger.debug(f"Error querying audio devices: {e}")
         return {"inputs": inputs, "outputs": outputs}
 
+    list_devices = get_available_devices
+
     def set_ptt_mode(self, enabled: bool):
         self.ptt_mode = enabled
 

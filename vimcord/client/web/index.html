@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VimCord</title>
+    <link rel="icon" href="icon.ico">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="theme-dark">
     <!-- Window Titlebar -->
     <div id="titlebar">
         <div class="titlebar-drag">
-            <span class="app-icon">🎙️</span>
+            <img src="icon.ico" class="app-titlebar-icon" alt="VimCord">
             <span class="app-title">VimCord</span>
             <span id="titlebar-sub"></span>
         </div>
@@ -21,8 +22,8 @@
         </div>
     </div>
 
-    <!-- Main App Container -->
-    <div id="app-container">
+    <!-- Main App Container (hidden until authenticated) -->
+    <div id="app-container" class="hidden">
         <!-- 1. Left Server Rail (72px) -->
         <nav id="server-rail">
             <button class="rail-btn home-btn active" id="btn-rail-home" title="Direct Messages">
@@ -235,37 +236,25 @@
     </div>
 
     <!-- Modals -->
-    <!-- 1. Login/Register Modal -->
-    <div id="modal-login" class="modal-overlay">
+    <!-- Dedicated Login/Register View (shown initially) -->
+    <div id="auth-container">
         <div class="modal-card login-card">
-            <div class="modal-logo">🎙️</div>
+            <div class="modal-logo">
+                <img src="icon.ico" class="login-logo-img" alt="VimCord">
+            </div>
             <h2 class="modal-title">Welcome to VimCord</h2>
             <div class="login-tabs">
-                <button class="login-tab-btn active" id="tab-btn-login">Login</button>
-                <button class="login-tab-btn" id="tab-btn-register">Register</button>
+                <button type="button" class="login-tab-btn active" id="tab-btn-login">Login</button>
+                <button type="button" class="login-tab-btn" id="tab-btn-register">Register</button>
             </div>
             <form id="form-auth">
                 <div class="input-group">
-                    <label>SERVER HOST</label>
-                    <input type="text" id="auth-host" value="127.0.0.1" required>
-                </div>
-                <div class="input-row">
-                    <div class="input-group">
-                        <label>TCP PORT</label>
-                        <input type="number" id="auth-tcp" value="9988" required>
-                    </div>
-                    <div class="input-group">
-                        <label>UDP PORT</label>
-                        <input type="number" id="auth-udp" value="9989" required>
-                    </div>
-                </div>
-                <div class="input-group">
                     <label>USERNAME</label>
-                    <input type="text" id="auth-username" required autocomplete="username">
+                    <input type="text" id="auth-username" required autocomplete="username" placeholder="Enter username">
                 </div>
                 <div class="input-group">
                     <label>PASSWORD</label>
-                    <input type="password" id="auth-password" required autocomplete="current-password">
+                    <input type="password" id="auth-password" required autocomplete="current-password" placeholder="Enter password">
                 </div>
                 <div class="input-row-check" id="row-auto-login">
                     <label><input type="checkbox" id="auth-autologin" checked> Auto-login on startup</label>
@@ -441,6 +430,13 @@
             <h3 id="prompt-title">Create Channel</h3>
             <p id="prompt-desc">Enter name:</p>
             <input type="text" id="prompt-input" style="width: 100%; margin: 12px 0;">
+            <div id="prompt-channel-type-row" class="hidden" style="margin-bottom: 14px; text-align: left;">
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">CHANNEL TYPE</label>
+                <select id="prompt-channel-type" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border-input); border-radius: 4px; padding: 8px; color: var(--text-bright);">
+                    <option value="text">💬 Text Channel</option>
+                    <option value="voice">🔊 Voice Channel</option>
+                </select>
+            </div>
             <div class="modal-actions">
                 <button id="btn-prompt-cancel" class="btn-secondary">Cancel</button>
                 <button id="btn-prompt-confirm" class="btn-primary">Create</button>

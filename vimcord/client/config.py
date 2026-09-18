@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from vimcord.common.protocol import DEFAULT_TCP_PORT, DEFAULT_UDP_PORT
+from vimcord.common.protocol import DEFAULT_HOST, DEFAULT_TCP_PORT, DEFAULT_UDP_PORT
 
 LEGACY_CONFIG_FILE = Path.home() / ".vimcord_client.json"
 
@@ -47,7 +47,7 @@ def get_resource_path(rel_path: str = "") -> Path:
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "host": "194.226.123.199",
+    "host": DEFAULT_HOST,
     "tcp_port": DEFAULT_TCP_PORT,
     "udp_port": DEFAULT_UDP_PORT,
     "username": "",
@@ -89,6 +89,16 @@ def load_config(config_file: Optional[Path] = None, config_path: Optional[Path] 
             with open(target_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
                 cfg.update(saved)
+        except Exception:
+            pass
+
+    # Ensure remote server host/port are used by default instead of obsolete local loopback
+    if cfg.get("host") in ("127.0.0.1", "localhost", "", None):
+        cfg["host"] = DEFAULT_HOST
+        cfg["tcp_port"] = DEFAULT_TCP_PORT
+        cfg["udp_port"] = DEFAULT_UDP_PORT
+        try:
+            save_config(cfg, config_file=config_file, config_path=config_path)
         except Exception:
             pass
 

@@ -43,24 +43,29 @@ def main():
     if not web_index.exists():
         web_index = Path(__file__).resolve().parent / "web" / "index.html"
 
+    icon_path = get_resource_path("icon.ico")
+    if not icon_path.exists():
+        icon_path = Path(__file__).resolve().parents[2] / "icon.ico"
+
     window = webview.create_window(
         title="VimCord",
         url=str(web_index),
         js_api=api,
-        width=1280,
-        height=800,
-        min_size=(960, 600),
-        background_color="#1e1f22"
+        width=460,
+        height=620,
+        min_size=(400, 500),
+        background_color="#1e1f22",
+        zoomable=False
     )
     api.set_window(window)
 
     def on_closing():
-        api.tray.update_speaking(False)
+        api._tray.update_speaking(False)
 
     window.events.closing += on_closing
 
-    # Start pywebview mainloop
-    webview.start(debug=args.debug)
+    # Start pywebview mainloop with native app icon
+    webview.start(debug=args.debug, icon=str(icon_path) if icon_path.exists() else None)
 
 
 if __name__ == "__main__":

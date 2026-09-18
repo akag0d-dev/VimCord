@@ -1,14 +1,12 @@
 /**
- * VimCord Client Frontend Application Logic
- * Integrates with pywebview Python API bridge.
+ * VimCord Web Frontend Application Logic
+ * Supports auth flow, chat, voice, direct calls, screen sharing, global hotkeys,
+ * settings, i18n, custom prompt modals, server/channel management, and clipboard paste.
  */
 
-// Global App State
+// ---------------- Application State ----------------
+
 const state = {
-    apiReady: false,
-    config: {},
-    language: 'en',
-    theme: 'dark',
     user: null,
     rooms: {},
     users: {},
@@ -16,67 +14,77 @@ const state = {
     currentRoomId: null,
     currentChannelId: null,
     currentDmPeerId: null,
-    currentVoiceChannelId: null,
+    activeTab: 'home', // 'home' or 'server'
     activeCallId: null,
-    callTimerInterval: null,
     callStartTime: null,
+    callTimerInterval: null,
     isMuted: false,
     isDeafened: false,
+    isSharingScreen: false,
+    isRecordingVoice: false,
+    voiceRecordStart: 0,
+    voiceRecordTimer: null,
+    currentAttachment: null,
     pttMode: false,
     pttKey: 'Space',
-    isRecordingVoice: false,
-    voiceTimerInterval: null,
-    voiceRecordSeconds: 0,
-    currentAttachment: null,
-    isTestingMic: false,
-    activeTab: 'friends' // 'friends', 'chat', 'voice'
+    theme: 'dark',
+    language: 'en',
+    config: {}
 };
 
-// UI Translations Dictionary
-const TRANSLATIONS = {
+let currentAuthTab = 'login';
+let currentPromptCallback = null;
+
+// ---------------- Localization Dictionary (Frontend) ----------------
+
+const I18N = {
     en: {
-        online: "Online", offline: "Offline", friends: "Friends", all: "All", pending: "Pending",
-        add_friend: "Add Friend", direct_messages: "DIRECT MESSAGES", text_channels: "TEXT CHANNELS",
-        voice_channels: "VOICE CHANNELS", voice_connected: "Voice Connected", mute_mic: "Mute",
-        deafen_audio: "Deafen", screen_share: "Screen", disconnect: "Disconnect", about_me: "My Account",
-        display_name: "Display Name", banner_color: "Banner Color", record_keybind: "Record Keybind",
-        pasted_from_clipboard: "Attached from clipboard", save: "Save", in_call: "In Call"
+        friends: "Friends", direct_messages: "DIRECT MESSAGES", text_channels: "TEXT CHANNELS",
+        voice_channels: "VOICE CHANNELS", voice_connected: "Voice Connected", mute: "Mute",
+        unmute: "Unmute", deafen: "Deafen", undeafen: "Undeafen", user_settings: "User Settings",
+        about_me: "My Account", voice_channel: "Voice & Video", input_mode: "INPUT MODE",
+        record_keybind: "Record Keybind", send_message: "Send a message...",
+        pasted_from_clipboard: "Attached from clipboard", save: "Save", in_call: "In Call",
+        create_server: "Create Server", join_server: "Join Server", create_channel: "Create Channel",
+        server_invite: "Server Invite"
     },
     ru: {
-        online: "В сети", offline: "Не в сети", friends: "Друзья", all: "Все", pending: "Ожидание",
-        add_friend: "Добавить в друзья", direct_messages: "ЛИЧНЫЕ СООБЩЕНИЯ", text_channels: "ТЕКСТОВЫЕ КАНАЛЫ",
-        voice_channels: "ГОЛОСОВЫЕ КАНАЛЫ", voice_connected: "Голос подключен", mute_mic: "Заглушить",
-        deafen_audio: "Заглушить звук", screen_share: "Демонстрация", disconnect: "Отключиться",
-        about_me: "О себе", display_name: "Отображаемое имя", banner_color: "Цвет баннера",
-        record_keybind: "Задать кнопку", pasted_from_clipboard: "Вставлено из буфера обмена",
-        save: "Сохранить", in_call: "В звонке"
+        friends: "Друзья", direct_messages: "ЛИЧНЫЕ СООБЩЕНИЯ", text_channels: "ТЕКСТОВЫЕ КАНАЛЫ",
+        voice_channels: "ГОЛОСОВЫЕ КАНАЛЫ", voice_connected: "Голос подключен", mute: "Заглушить микрофон",
+        unmute: "Включить микрофон", deafen: "Заглушить звук", undeafen: "Включить звук",
+        user_settings: "Настройки пользователя", about_me: "Моя учетная запись", voice_channel: "Голос и видео",
+        input_mode: "РЕЖИМ ВВОДА", record_keybind: "Задать кнопку", pasted_from_clipboard: "Вставлено из буфера обмена",
+        send_message: "Написать сообщение...", save: "Сохранить", in_call: "В звонке",
+        create_server: "Создать сервер", join_server: "Присоединиться к серверу", create_channel: "Создать канал",
+        server_invite: "Приглашение на сервер"
     }
 };
 
-function t(key, defaultVal = '') {
-    const lang = TRANSLATIONS[state.language] || TRANSLATIONS.en;
-    return lang[key] || defaultVal || key;
+function t(key, fallback = "") {
+    const lang = state.language || 'en';
+    if (I18N[lang] && I18N[lang][key]) {
+        return I18N[lang][key];
+    }
+    return fallback || key;
 }
 
-// ---------------- Initialization ----------------
+// ---------------- Lifecycle & Initialization ----------------
 
 window.addEventListener('pywebviewready', () => {
     initApp();
 });
 
-// Fallback polling for pywebview API
-if (!state.apiReady) {
-    const checkInterval = setInterval(() => {
-        if (window.pywebview && window.pywebview.api) {
-            clearInterval(checkInterval);
-            initApp();
-        }
-    }, 100);
-}
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.pywebview && window.pywebview.api) {
+        initApp();
+    }
+});
+
+let isInitialized = false;
 
 async function initApp() {
-    if (state.apiReady) return;
-    state.apiReady = true;
+    if (isInitialized) return;
+    isInitialized = true;
 
     bindDomEvents();
 
@@ -93,7 +101,7 @@ async function initApp() {
         renderPttSettings(state.pttMode, state.pttKey);
         populateAudioDevices(initData.audio_devices || {});
 
-        // Pre-fill login credentials
+        // Pre-fill login credentials if saved
         if (initData.saved_username) {
             document.getElementById('auth-username').value = initData.saved_username;
         }
@@ -102,7 +110,7 @@ async function initApp() {
         }
         document.getElementById('auth-autologin').checked = !!initData.auto_login;
 
-        // Attempt auto login
+        // Attempt auto-login if enabled
         if (initData.auto_login && initData.saved_username && initData.saved_password) {
             doLogin(initData.saved_username, initData.saved_password, true);
         }
@@ -114,17 +122,21 @@ async function initApp() {
 // ---------------- DOM Event Bindings ----------------
 
 function bindDomEvents() {
-    // Window Titlebar
+    // Window Titlebar Controls
     document.getElementById('btn-win-min').onclick = () => window.pywebview.api.minimize_window();
     document.getElementById('btn-win-max').onclick = () => window.pywebview.api.toggle_maximize_window();
     document.getElementById('btn-win-close').onclick = () => window.pywebview.api.close_window();
 
-    // Server Rail Home Button
+    // Server Rail Home & Navigation
     document.getElementById('btn-rail-home').onclick = () => switchMode('home');
     document.getElementById('btn-rail-add').onclick = () => promptCreateRoom();
     document.getElementById('btn-rail-join').onclick = () => promptJoinInvite();
 
-    // Friends Tab
+    // Channel Header Buttons
+    document.getElementById('btn-create-channel').onclick = () => promptCreateChannel();
+    document.getElementById('btn-server-invite').onclick = () => promptServerInvite();
+
+    // Friends Tab Filter Buttons
     document.getElementById('btn-tab-friends').onclick = () => switchMode('home');
     document.querySelectorAll('.friends-tab').forEach(tab => {
         tab.onclick = () => {
@@ -198,6 +210,7 @@ function bindDomEvents() {
     document.getElementById('btn-record-keybind').onclick = startRecordKeybind;
     document.getElementById('radio-vad').onchange = () => updateInputMode(false);
     document.getElementById('radio-ptt').onchange = () => updateInputMode(true);
+
     document.getElementById('btn-save-profile').onclick = saveProfileSettings;
     document.getElementById('btn-save-password').onclick = savePasswordChange;
 
@@ -215,10 +228,29 @@ function bindDomEvents() {
         };
     });
 
-    // Auth Form
+    // Auth Form Submit & Tabs
     document.getElementById('form-auth').onsubmit = handleAuthSubmit;
     document.getElementById('tab-btn-login').onclick = () => switchAuthTab('login');
     document.getElementById('tab-btn-register').onclick = () => switchAuthTab('register');
+
+    // Prompt Modal Actions
+    document.getElementById('btn-prompt-cancel').onclick = closePromptModal;
+    document.getElementById('btn-prompt-confirm').onclick = () => {
+        const val = document.getElementById('prompt-input').value;
+        const typeSelect = document.getElementById('prompt-channel-type');
+        const chType = typeSelect ? typeSelect.value : 'text';
+        if (currentPromptCallback) {
+            currentPromptCallback(val, chType);
+        }
+        closePromptModal();
+    };
+    document.getElementById('prompt-input').onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('btn-prompt-confirm').click();
+        } else if (e.key === 'Escape') {
+            closePromptModal();
+        }
+    };
 
     // Incoming Call Modal
     document.getElementById('btn-accept-call').onclick = acceptIncomingCall;
@@ -232,53 +264,71 @@ function bindDomEvents() {
 
 // ---------------- Clipboard Paste Handler (Ctrl + V) ----------------
 
-function handlePasteEvent(e) {
+async function handlePasteEvent(e) {
     const items = (e.clipboardData || window.clipboardData)?.items;
-    if (!items || items.length === 0) return;
+    let handled = false;
 
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+    if (items && items.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
 
-        // 1. Image pasted (Snipping Tool, browser screenshot, Paint, etc.)
-        if (item.type.indexOf('image') !== -1) {
-            const blob = item.getAsFile();
-            if (blob) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    const base64Data = evt.target.result.split(',')[1];
-                    const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
-                    setAttachment({
-                        name: `screenshot_${timestamp}.png`,
-                        size: blob.size,
-                        is_image: true,
-                        data: base64Data
-                    });
-                    showToast(t('pasted_from_clipboard', 'Attached image from clipboard'));
-                };
-                reader.readAsDataURL(blob);
-                e.preventDefault();
-                return;
+            // 1. Image pasted (Snipping Tool, browser screenshot, Paint, etc.)
+            if (item.type.indexOf('image') !== -1) {
+                const blob = item.getAsFile();
+                if (blob) {
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        const base64Data = evt.target.result.split(',')[1];
+                        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+                        setAttachment({
+                            name: `screenshot_${timestamp}.png`,
+                            size: blob.size,
+                            is_image: true,
+                            data: base64Data
+                        });
+                        showToast(t('pasted_from_clipboard', 'Attached image from clipboard'));
+                    };
+                    reader.readAsDataURL(blob);
+                    e.preventDefault();
+                    handled = true;
+                    return;
+                }
+            }
+            // 2. File pasted (copied from File Explorer)
+            else if (item.kind === 'file') {
+                const file = item.getAsFile();
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        const base64Data = evt.target.result.split(',')[1];
+                        setAttachment({
+                            name: file.name,
+                            size: file.size,
+                            is_image: file.type.startsWith('image/'),
+                            data: base64Data
+                        });
+                        showToast(t('pasted_from_clipboard', 'Attached file from clipboard'));
+                    };
+                    reader.readAsDataURL(file);
+                    e.preventDefault();
+                    handled = true;
+                    return;
+                }
             }
         }
-        // 2. File pasted (copied from File Explorer)
-        else if (item.kind === 'file') {
-            const file = item.getAsFile();
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    const base64Data = evt.target.result.split(',')[1];
-                    setAttachment({
-                        name: file.name,
-                        size: file.size,
-                        is_image: file.type.startsWith('image/'),
-                        data: base64Data
-                    });
-                    showToast(t('pasted_from_clipboard', 'Attached file from clipboard'));
-                };
-                reader.readAsDataURL(file);
+    }
+
+    // Fallback: If clipboardData items didn't contain image/file, check OS clipboard via Python API
+    if (!handled && window.pywebview?.api?.get_clipboard_image) {
+        try {
+            const clipImg = await window.pywebview.api.get_clipboard_image();
+            if (clipImg && clipImg.data) {
+                setAttachment(clipImg);
+                showToast(t('pasted_from_clipboard', 'Attached image from clipboard'));
                 e.preventDefault();
-                return;
             }
+        } catch (err) {
+            // Ignore normal text paste
         }
     }
 }
@@ -344,30 +394,49 @@ window.onVimCordEvent = function(eventName, payload) {
             onPong(payload);
             break;
         case 'room_created':
+            onRoomCreated(payload);
+            break;
+        case 'room_deleted':
+            onRoomDeleted(payload);
+            break;
         case 'channel_created':
-        case 'channel_renamed':
+            onChannelCreated(payload);
+            break;
         case 'channel_deleted':
-            onStructureUpdate();
+            onChannelDeleted(payload);
+            break;
+        case 'channel_renamed':
+            onChannelRenamed(payload);
+            break;
+        case 'room_invite_created':
+            onRoomInviteCreated(payload);
+            break;
+        case 'room_invite_joined':
+            onRoomInviteJoined(payload);
+            break;
+        case 'leave_room_resp':
+            onLeaveRoomResp(payload);
+            break;
+        case 'room_members_resp':
+            onRoomMembersResp(payload);
             break;
     }
 };
 
 // ---------------- Auth Logic ----------------
 
-let currentAuthTab = 'login';
 function switchAuthTab(tab) {
     currentAuthTab = tab;
     document.getElementById('tab-btn-login').classList.toggle('active', tab === 'login');
     document.getElementById('tab-btn-register').classList.toggle('active', tab === 'register');
     document.getElementById('btn-auth-submit').textContent = (tab === 'login') ? 'Log In' : 'Register';
     document.getElementById('row-auto-login').style.display = (tab === 'login') ? 'block' : 'none';
+    const err = document.getElementById('auth-error');
+    if (err) err.classList.add('hidden');
 }
 
 function handleAuthSubmit(e) {
     e.preventDefault();
-    const host = document.getElementById('auth-host').value.trim();
-    const tcp = parseInt(document.getElementById('auth-tcp').value.trim(), 10);
-    const udp = parseInt(document.getElementById('auth-udp').value.trim(), 10);
     const u = document.getElementById('auth-username').value.trim();
     const p = document.getElementById('auth-password').value;
     const autologin = document.getElementById('auth-autologin').checked;
@@ -376,24 +445,34 @@ function handleAuthSubmit(e) {
     btn.disabled = true;
     btn.textContent = 'Connecting...';
 
+    const err = document.getElementById('auth-error');
+    if (err) err.classList.add('hidden');
+
     if (currentAuthTab === 'login') {
-        window.pywebview.api.login(u, p, host, tcp, udp, autologin);
+        window.pywebview.api.login(u, p, '', 0, 0, autologin);
     } else {
-        window.pywebview.api.register(u, p, host, tcp, udp);
+        window.pywebview.api.register(u, p, '', 0, 0);
     }
 }
 
 function doLogin(u, p, autologin) {
-    const host = document.getElementById('auth-host').value.trim();
-    const tcp = parseInt(document.getElementById('auth-tcp').value.trim(), 10);
-    const udp = parseInt(document.getElementById('auth-udp').value.trim(), 10);
-    window.pywebview.api.login(u, p, host, tcp, udp, autologin);
+    const btn = document.getElementById('btn-auth-submit');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Connecting...';
+    }
+    const err = document.getElementById('auth-error');
+    if (err) err.classList.add('hidden');
+
+    window.pywebview.api.login(u, p, '', 0, 0, autologin);
 }
 
 function onLoginResponse(res) {
     const btn = document.getElementById('btn-auth-submit');
-    btn.disabled = false;
-    btn.textContent = 'Log In';
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = (currentAuthTab === 'login') ? 'Log In' : 'Register';
+    }
 
     if (!res.success) {
         const err = document.getElementById('auth-error');
@@ -402,8 +481,11 @@ function onLoginResponse(res) {
         return;
     }
 
-    // Success
-    document.getElementById('modal-login').classList.add('hidden');
+    // Success: Transition from dedicated auth screen to main workspace
+    document.getElementById('auth-container').classList.add('hidden');
+    document.getElementById('app-container').classList.remove('hidden');
+    window.pywebview.api.set_window_size(1280, 800);
+
     state.user = res.data;
     state.rooms = {};
     (res.data.rooms || []).forEach(r => state.rooms[r.room_id] = r);
@@ -420,8 +502,10 @@ function onLoginResponse(res) {
 
 function onRegisterResponse(res) {
     const btn = document.getElementById('btn-auth-submit');
-    btn.disabled = false;
-    btn.textContent = 'Register';
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Register';
+    }
 
     if (!res.success) {
         const err = document.getElementById('auth-error');
@@ -438,9 +522,10 @@ function onRegisterResponse(res) {
 
 function doLogout() {
     closeSettings();
-    document.getElementById('modal-login').classList.remove('hidden');
+    document.getElementById('app-container').classList.add('hidden');
+    document.getElementById('auth-container').classList.remove('hidden');
     state.user = null;
-    window.pywebview.api.leave_voice();
+    window.pywebview.api.logout();
 }
 
 // ---------------- Profile & User Panel ----------------
@@ -462,19 +547,21 @@ function updateUserPanelProfile() {
     }
 }
 
-// ---------------- Navigation & Sidebar ----------------
+// ---------------- Server & Channel Management ----------------
 
 function switchMode(mode, targetId = null) {
+    state.activeTab = mode;
     const homeRailBtn = document.getElementById('btn-rail-home');
-    document.querySelectorAll('.server-rail-btn').forEach(b => b.classList.remove('active'));
 
     if (mode === 'home') {
         homeRailBtn.classList.add('active');
-        document.getElementById('sidebar-title').textContent = 'Direct Messages';
+        document.querySelectorAll('.server-rail-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('sidebar-title').textContent = t('direct_messages', 'Direct Messages');
         document.getElementById('home-sidebar').classList.remove('hidden');
         document.getElementById('server-sidebar').classList.add('hidden');
         document.getElementById('btn-create-channel').classList.add('hidden');
         document.getElementById('btn-server-invite').classList.add('hidden');
+        state.currentRoomId = null;
 
         showFriendsView();
     } else if (mode === 'server') {
@@ -490,6 +577,7 @@ function switchMode(mode, targetId = null) {
         document.getElementById('btn-server-invite').classList.remove('hidden');
 
         renderServerChannels(room);
+        window.pywebview.api.get_room_members(targetId);
     }
 }
 
@@ -500,6 +588,9 @@ function renderServerRail() {
     Object.values(state.rooms).forEach(room => {
         const btn = document.createElement('button');
         btn.className = 'rail-btn server-rail-btn';
+        if (state.currentRoomId === room.room_id) {
+            btn.classList.add('active');
+        }
         btn.title = room.name;
         btn.innerHTML = `<span class="rail-icon">${room.name.charAt(0).toUpperCase()}</span><div class="pill-indicator"></div>`;
         btn.onclick = () => {
@@ -507,6 +598,21 @@ function renderServerRail() {
             btn.classList.add('active');
             switchMode('server', room.room_id);
         };
+
+        // Right-click menu for server options (Delete or Leave)
+        btn.oncontextmenu = (e) => {
+            e.preventDefault();
+            const isOwner = room.owner_id === state.user?.user_id;
+            const action = isOwner ? 'Delete Server' : 'Leave Server';
+            if (confirm(`${action} "${room.name}"?`)) {
+                if (isOwner) {
+                    window.pywebview.api.delete_room(room.room_id);
+                } else {
+                    window.pywebview.api.leave_room(room.room_id);
+                }
+            }
+        };
+
         railList.appendChild(btn);
     });
 }
@@ -519,11 +625,13 @@ function renderDmList() {
     const list = document.getElementById('dm-list');
     list.innerHTML = '';
 
-    // DM list with friends/users
     const peers = state.friends.filter(f => f.friendship_status === 'accepted');
     peers.forEach(f => {
         const item = document.createElement('button');
         item.className = 'sidebar-item';
+        if (state.currentDmPeerId === f.peer_id) {
+            item.classList.add('active');
+        }
         item.innerHTML = `
             <div class="avatar-wrap">
                 <div class="avatar" style="background-color: ${f.avatar_color || '#5865F2'}">${(f.peer_display_name || f.peer_name).charAt(0).toUpperCase()}</div>
@@ -543,101 +651,340 @@ function renderServerChannels(room) {
     voiceList.innerHTML = '';
 
     (room.channels || []).forEach(ch => {
-        const item = document.createElement('button');
-        item.className = 'sidebar-item';
+        const item = document.createElement('div');
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.position = 'relative';
+
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-item';
+        btn.style.flex = '1';
+
         if (ch.type === 'voice') {
-            item.innerHTML = `<span class="item-icon">🔊</span><span class="item-name">${ch.name}</span>`;
-            item.onclick = () => selectVoiceChannel(room.room_id, ch.channel_id, ch.name);
+            btn.innerHTML = `<span class="item-icon">🔊</span><span class="item-name">${ch.name}</span>`;
+            btn.onclick = () => selectVoiceChannel(room.room_id, ch.channel_id, ch.name);
+            item.appendChild(btn);
             voiceList.appendChild(item);
         } else {
-            item.innerHTML = `<span class="item-icon">#</span><span class="item-name">${ch.name}</span>`;
-            item.onclick = () => selectTextChannel(room.room_id, ch.channel_id, ch.name);
+            btn.innerHTML = `<span class="item-icon">#</span><span class="item-name">${ch.name}</span>`;
+            if (state.currentChannelId === ch.channel_id) {
+                btn.classList.add('active');
+            }
+            btn.onclick = () => selectTextChannel(room.room_id, ch.channel_id, ch.name);
+            item.appendChild(btn);
             textList.appendChild(item);
+        }
+
+        // Delete channel option for server owner
+        if (room.owner_id === state.user?.user_id && room.channels.length > 1) {
+            const delBtn = document.createElement('button');
+            delBtn.style.background = 'transparent';
+            delBtn.style.border = 'none';
+            delBtn.style.color = 'var(--text-muted)';
+            delBtn.style.cursor = 'pointer';
+            delBtn.style.padding = '4px 8px';
+            delBtn.style.fontSize = '14px';
+            delBtn.title = 'Delete Channel';
+            delBtn.innerHTML = '&times;';
+            delBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (confirm(`Delete channel #${ch.name}?`)) {
+                    window.pywebview.api.delete_channel(room.room_id, ch.channel_id);
+                }
+            };
+            item.appendChild(delBtn);
         }
     });
 
-    // Select first text channel by default
-    const firstText = (room.channels || []).find(c => c.type !== 'voice');
-    if (firstText) {
-        selectTextChannel(room.room_id, firstText.channel_id, firstText.name);
+    // Select first text channel by default if none selected
+    if (!state.currentChannelId) {
+        const firstText = (room.channels || []).find(c => c.type !== 'voice');
+        if (firstText) {
+            selectTextChannel(room.room_id, firstText.channel_id, firstText.name);
+        }
     }
 }
-
-// ---------------- Channels & Workspaces ----------------
 
 function showFriendsView() {
     state.activeTab = 'friends';
     state.currentChannelId = null;
     state.currentDmPeerId = null;
 
-    document.getElementById('view-friends').classList.remove('hidden');
-    document.getElementById('view-chat').classList.add('hidden');
-    document.getElementById('view-voice-stage').classList.add('hidden');
+    document.getElementById('friends-view').classList.remove('hidden');
+    document.getElementById('chat-view').classList.add('hidden');
+    document.getElementById('voice-stage-view').classList.add('hidden');
 
-    document.getElementById('channel-header-icon').textContent = '👥';
-    document.getElementById('channel-header-title').textContent = 'Friends';
-    document.getElementById('channel-header-desc').textContent = '';
+    document.getElementById('chat-header-title').textContent = t('friends', 'Friends');
+    document.getElementById('chat-header-desc').textContent = '';
     document.getElementById('btn-header-call').classList.add('hidden');
+    document.getElementById('btn-toggle-members').classList.add('hidden');
 }
 
 function selectTextChannel(roomId, channelId, channelName) {
-    state.activeTab = 'chat';
     state.currentRoomId = roomId;
     state.currentChannelId = channelId;
     state.currentDmPeerId = null;
 
-    document.getElementById('view-friends').classList.add('hidden');
-    document.getElementById('view-chat').classList.remove('hidden');
-    document.getElementById('view-voice-stage').classList.add('hidden');
-    document.getElementById('dm-call-widget').classList.add('hidden');
+    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
+    document.getElementById('friends-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.remove('hidden');
+    document.getElementById('voice-stage-view').classList.add('hidden');
 
-    document.getElementById('channel-header-icon').textContent = '#';
-    document.getElementById('channel-header-title').textContent = channelName;
-    document.getElementById('channel-header-desc').textContent = 'Welcome to #' + channelName;
+    document.getElementById('chat-header-title').textContent = `# ${channelName}`;
+    document.getElementById('chat-header-desc').textContent = `Welcome to #${channelName}!`;
+    document.getElementById('chat-text-input').placeholder = `Message #${channelName}`;
     document.getElementById('btn-header-call').classList.add('hidden');
+    document.getElementById('btn-toggle-members').classList.remove('hidden');
 
-    document.getElementById('chat-messages-list').innerHTML = '';
+    document.getElementById('messages-list').innerHTML = '';
     window.pywebview.api.get_history('channel', channelId);
 }
 
 function selectDmUser(peerId, peerName) {
-    state.activeTab = 'chat';
-    state.currentChannelId = null;
     state.currentDmPeerId = peerId;
+    state.currentChannelId = null;
+    state.currentRoomId = null;
 
-    document.getElementById('view-friends').classList.add('hidden');
-    document.getElementById('view-chat').classList.remove('hidden');
-    document.getElementById('view-voice-stage').classList.add('hidden');
+    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
+    document.getElementById('friends-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.remove('hidden');
+    document.getElementById('voice-stage-view').classList.add('hidden');
 
-    document.getElementById('channel-header-icon').textContent = '@';
-    document.getElementById('channel-header-title').textContent = peerName;
-    document.getElementById('channel-header-desc').textContent = '';
+    document.getElementById('chat-header-title').textContent = `@ ${peerName}`;
+    document.getElementById('chat-header-desc').textContent = `Direct message with ${peerName}`;
+    document.getElementById('chat-text-input').placeholder = `Message @${peerName}`;
     document.getElementById('btn-header-call').classList.remove('hidden');
+    document.getElementById('btn-toggle-members').classList.add('hidden');
 
-    document.getElementById('chat-messages-list').innerHTML = '';
+    document.getElementById('messages-list').innerHTML = '';
     window.pywebview.api.get_history('dm', peerId);
-
-    // If active direct call with this user, show call widget
-    if (state.activeCallId) {
-        document.getElementById('dm-call-widget').classList.remove('hidden');
-    }
 }
 
 function selectVoiceChannel(roomId, channelId, channelName) {
-    state.currentVoiceChannelId = channelId;
-    window.pywebview.api.join_voice(roomId, channelId);
-
-    document.getElementById('view-friends').classList.add('hidden');
-    document.getElementById('view-chat').classList.add('hidden');
-    document.getElementById('view-voice-stage').classList.remove('hidden');
-
     document.getElementById('voice-status-bar').classList.remove('hidden');
-    document.getElementById('voice-status-channel').textContent = `${channelName} / RTC`;
+    document.getElementById('voice-status-channel').textContent = `${channelName} / Voice Connected`;
+
+    document.getElementById('friends-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.add('hidden');
+    document.getElementById('voice-stage-view').classList.remove('hidden');
+    document.getElementById('voice-stage-channel-name').textContent = channelName;
 
     renderVoiceStage(channelName);
+    window.pywebview.api.join_voice(roomId, channelId);
 }
 
-// ---------------- Chat & Messages ----------------
+// ---------------- Custom Prompt Modal Helper ----------------
+
+function showPromptModal({ title, desc, placeholder = '', initialValue = '', confirmText = 'Confirm', showChannelType = false, onConfirm }) {
+    const modal = document.getElementById('modal-prompt');
+    document.getElementById('prompt-title').textContent = title || 'VimCord';
+    document.getElementById('prompt-desc').textContent = desc || '';
+    const input = document.getElementById('prompt-input');
+    input.value = initialValue;
+    input.placeholder = placeholder;
+
+    const typeRow = document.getElementById('prompt-channel-type-row');
+    if (typeRow) {
+        typeRow.classList.toggle('hidden', !showChannelType);
+        if (showChannelType) {
+            document.getElementById('prompt-channel-type').value = 'text';
+        }
+    }
+
+    document.getElementById('btn-prompt-confirm').textContent = confirmText;
+    currentPromptCallback = onConfirm;
+    modal.classList.remove('hidden');
+    input.focus();
+}
+
+function closePromptModal() {
+    document.getElementById('modal-prompt').classList.add('hidden');
+    currentPromptCallback = null;
+}
+
+function promptCreateRoom() {
+    showPromptModal({
+        title: 'Create a Server',
+        desc: 'Enter a name for your new server:',
+        placeholder: 'e.g. My Gaming Server',
+        confirmText: 'Create Server',
+        showChannelType: false,
+        onConfirm: (val) => {
+            if (val.trim()) {
+                window.pywebview.api.create_room(val.trim());
+            }
+        }
+    });
+}
+
+function promptJoinInvite() {
+    showPromptModal({
+        title: 'Join a Server',
+        desc: 'Enter an invite link or code:',
+        placeholder: 'e.g. vc-abc12345',
+        confirmText: 'Join Server',
+        showChannelType: false,
+        onConfirm: (code) => {
+            const cleanCode = code.trim().replace(/^.*\/invite\//, '').replace(/^.*code=/, '');
+            if (cleanCode) {
+                window.pywebview.api.join_room_by_invite(cleanCode);
+            }
+        }
+    });
+}
+
+function promptCreateChannel() {
+    if (!state.currentRoomId) return;
+    showPromptModal({
+        title: 'Create Channel',
+        desc: 'Enter channel name and select type:',
+        placeholder: 'e.g. general',
+        confirmText: 'Create Channel',
+        showChannelType: true,
+        onConfirm: (name, channelType) => {
+            if (name.trim()) {
+                window.pywebview.api.create_channel(state.currentRoomId, name.trim(), channelType || 'text');
+            }
+        }
+    });
+}
+
+function promptServerInvite() {
+    if (!state.currentRoomId) return;
+    window.pywebview.api.create_room_invite(state.currentRoomId);
+}
+
+// ---------------- Structure Event Handlers ----------------
+
+function onRoomCreated(room) {
+    if (!room || !room.room_id) return;
+    state.rooms[room.room_id] = room;
+    renderServerRail();
+    switchMode('server', room.room_id);
+    showToast(`Server "${room.name}" created!`);
+}
+
+function onRoomDeleted(payload) {
+    const roomId = typeof payload === 'string' ? payload : payload.room_id;
+    if (state.rooms[roomId]) {
+        delete state.rooms[roomId];
+        renderServerRail();
+        if (state.currentRoomId === roomId) {
+            switchMode('home');
+        }
+        showToast('Server deleted.');
+    }
+}
+
+function onChannelCreated(payload) {
+    const { room_id, channel } = payload;
+    if (state.rooms[room_id]) {
+        state.rooms[room_id].channels = state.rooms[room_id].channels || [];
+        if (!state.rooms[room_id].channels.some(c => c.channel_id === channel.channel_id)) {
+            state.rooms[room_id].channels.push(channel);
+        }
+        if (state.currentRoomId === room_id) {
+            renderServerChannels(state.rooms[room_id]);
+        }
+        showToast(`Channel "#${channel.name}" created.`);
+    }
+}
+
+function onChannelDeleted(payload) {
+    const { room_id, channel_id } = payload;
+    if (state.rooms[room_id] && state.rooms[room_id].channels) {
+        state.rooms[room_id].channels = state.rooms[room_id].channels.filter(c => c.channel_id !== channel_id);
+        if (state.currentRoomId === room_id) {
+            renderServerChannels(state.rooms[room_id]);
+        }
+        showToast('Channel deleted.');
+    }
+}
+
+function onChannelRenamed(payload) {
+    const { room_id, channel_id, name } = payload;
+    if (state.rooms[room_id] && state.rooms[room_id].channels) {
+        const ch = state.rooms[room_id].channels.find(c => c.channel_id === channel_id);
+        if (ch) ch.name = name;
+        if (state.currentRoomId === room_id) {
+            renderServerChannels(state.rooms[room_id]);
+        }
+    }
+}
+
+function onRoomInviteCreated(payload) {
+    const code = payload.code || payload;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(code);
+    }
+    showToast(`Invite code copied to clipboard: ${code}`);
+}
+
+function onRoomInviteJoined(payload) {
+    if (payload.success && payload.data) {
+        const room = payload.data;
+        state.rooms[room.room_id] = room;
+        renderServerRail();
+        switchMode('server', room.room_id);
+        showToast(`Joined server "${room.name}"!`);
+    } else {
+        showToast(payload.message || 'Failed to join server.');
+    }
+}
+
+function onLeaveRoomResp(payload) {
+    if (payload.success) {
+        const roomId = payload.room_id;
+        if (state.rooms[roomId]) {
+            delete state.rooms[roomId];
+            renderServerRail();
+            if (state.currentRoomId === roomId) {
+                switchMode('home');
+            }
+        }
+        showToast('Left server.');
+    } else {
+        showToast(payload.message || 'Could not leave server.');
+    }
+}
+
+function onRoomMembersResp(payload) {
+    const { room_id, members } = payload;
+    if (state.currentRoomId === room_id) {
+        renderMemberList(members);
+    }
+}
+
+function renderMemberList(members) {
+    const list = document.getElementById('member-list');
+    if (!list) return;
+    list.innerHTML = '';
+    (members || []).forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'member-item';
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.padding = '6px 8px';
+        item.style.borderRadius = '4px';
+        item.style.cursor = 'pointer';
+        item.innerHTML = `
+            <div class="avatar-wrap">
+                <div class="avatar" style="background-color: ${m.avatar_color || '#5865F2'}">${(m.display_name || m.username).charAt(0).toUpperCase()}</div>
+                <div class="status-dot ${m.is_online ? 'status-online' : 'status-offline'}"></div>
+            </div>
+            <div class="member-info" style="margin-left: 8px;">
+                <div class="member-name" style="font-weight: 600; color: var(--text-bright);">${m.display_name || m.username}</div>
+                <div class="member-role" style="font-size: 11px; color: var(--text-muted);">${m.is_owner ? 'Owner' : 'Member'}</div>
+            </div>
+        `;
+        if (m.user_id !== state.user?.user_id) {
+            item.onclick = () => selectDmUser(m.user_id, m.display_name || m.username);
+        }
+        list.appendChild(item);
+    });
+}
+
+// ---------------- Chat & File Upload ----------------
 
 async function chooseAttachment() {
     const res = await window.pywebview.api.open_file_dialog();
@@ -649,143 +996,143 @@ async function chooseAttachment() {
     setAttachment(res);
 }
 
-function setAttachment(attachObj) {
-    state.currentAttachment = attachObj;
-    const strip = document.getElementById('attachment-preview-strip');
-    const thumbImg = document.getElementById('preview-thumb-img');
-    const thumbIcon = document.getElementById('preview-thumb-icon');
-    const nameEl = document.getElementById('preview-filename');
-    const sizeEl = document.getElementById('preview-filesize');
-
-    nameEl.textContent = attachObj.name;
-    sizeEl.textContent = formatBytes(attachObj.size);
-
-    if (attachObj.is_image) {
-        thumbImg.src = `data:image/png;base64,${attachObj.data}`;
-        thumbImg.classList.remove('hidden');
-        thumbIcon.classList.add('hidden');
-    } else {
-        thumbImg.classList.add('hidden');
-        thumbIcon.classList.remove('hidden');
-    }
-
-    strip.classList.remove('hidden');
+function setAttachment(att) {
+    state.currentAttachment = att;
+    const bar = document.getElementById('attachment-preview-bar');
+    const nameEl = document.getElementById('attachment-preview-name');
+    nameEl.textContent = `${att.name} (${formatBytes(att.size)})`;
+    bar.classList.remove('hidden');
 }
 
 function clearAttachment() {
     state.currentAttachment = null;
-    document.getElementById('attachment-preview-strip').classList.add('hidden');
+    document.getElementById('attachment-preview-bar').classList.add('hidden');
 }
 
 function sendMessage() {
     const input = document.getElementById('chat-text-input');
     const text = input.value.trim();
-    const attach = state.currentAttachment;
+    if (!text && !state.currentAttachment) return;
 
-    if (!text && !attach) return;
-
-    const targetType = state.currentChannelId ? 'channel' : 'dm';
-    const targetId = state.currentChannelId || state.currentDmPeerId;
+    const targetType = state.currentDmPeerId ? 'dm' : 'channel';
+    const targetId = state.currentDmPeerId || state.currentChannelId;
     if (!targetId) return;
 
-    let imgData = '';
-    let fileData = '';
-    let fileName = '';
+    let imgData = "";
+    let fileData = "";
+    let fileName = "";
     let fileSize = 0;
 
-    if (attach) {
-        if (attach.is_image) {
-            imgData = attach.data;
+    if (state.currentAttachment) {
+        if (state.currentAttachment.is_image) {
+            imgData = state.currentAttachment.data;
         } else {
-            fileData = attach.data;
-            fileName = attach.name;
-            fileSize = attach.size;
+            fileData = state.currentAttachment.data;
+            fileName = state.currentAttachment.name;
+            fileSize = state.currentAttachment.size;
         }
     }
 
+    const localMsg = {
+        msg_id: `temp-${Date.now()}`,
+        sender_id: state.user?.user_id,
+        sender_name: state.user?.display_name || state.user?.username,
+        target_type: targetType,
+        target_id: targetId,
+        content: text,
+        image_data: imgData,
+        file_data: fileData,
+        file_name: fileName,
+        file_size: fileSize,
+        timestamp: Date.now() / 1000,
+        pending: false
+    };
+
+    appendMessage(localMsg);
     input.value = '';
     clearAttachment();
 
     window.pywebview.api.send_chat_message(
-        targetType, targetId, text, imgData, '', 0.0, fileData, fileName, fileSize
+        targetType, targetId, text,
+        imgData, '', 0.0,
+        fileData, fileName, fileSize
     );
 }
 
 function onChatMessageReceived(msg) {
-    // Only append if message matches current view
-    const isCurrentChannel = state.currentChannelId && msg.target_type === 'channel' && msg.target_id === state.currentChannelId;
-    const isCurrentDm = state.currentDmPeerId && msg.target_type === 'dm' && (msg.target_id === state.currentDmPeerId || msg.sender_id === state.currentDmPeerId);
-
-    if (isCurrentChannel || isCurrentDm) {
-        appendMessageToDom(msg);
+    const currentTarget = state.currentDmPeerId || state.currentChannelId;
+    if (msg.target_id === currentTarget || (msg.target_type === 'dm' && msg.sender_id === state.currentDmPeerId)) {
+        appendMessage(msg);
     }
 }
 
 function onHistoryReceived(data) {
-    const list = document.getElementById('chat-messages-list');
+    const list = document.getElementById('messages-list');
     list.innerHTML = '';
-    (data.messages || []).forEach(msg => appendMessageToDom(msg));
-}
-
-function appendMessageToDom(msg) {
-    const list = document.getElementById('chat-messages-list');
-    const group = document.createElement('div');
-    group.className = 'message-group';
-    group.id = `msg-${msg.msg_id}`;
-
-    const disp = msg.display_name || msg.sender_name || 'User';
-    const dateStr = new Date((msg.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    let avatarHtml = `<div class="msg-avatar" style="background-color: ${msg.avatar_color || '#5865F2'}">${disp.charAt(0).toUpperCase()}</div>`;
-    if (msg.avatar_image) {
-        avatarHtml = `<div class="msg-avatar" style="background-image: url(data:image/png;base64,${msg.avatar_image});"></div>`;
-    }
-
-    let attachmentHtml = '';
-    if (msg.image_data) {
-        attachmentHtml = `<img class="msg-img-preview" src="data:image/png;base64,${msg.image_data}" onclick="openLightbox(this.src)">`;
-    } else if (msg.file_data) {
-        attachmentHtml = `
-            <div class="msg-file-card">
-                <div class="file-card-icon">📄</div>
-                <div class="file-card-details">
-                    <div class="file-name">${escapeHtml(msg.file_name || 'file')}</div>
-                    <div class="file-size">${formatBytes(msg.file_size || 0)}</div>
-                </div>
-                <button class="file-download-btn" onclick="saveFile('${escapeHtml(msg.file_name)}', '${msg.file_data}')">⬇️ ${t('save', 'Save')}</button>
-            </div>
-        `;
-    } else if (msg.voice_data) {
-        attachmentHtml = `
-            <div class="msg-voice-card">
-                <button class="voice-play-btn" onclick="playVoiceMsg('${msg.voice_data}', ${msg.voice_duration || 0})">▶</button>
-                <span class="voice-wave">〰️〰️〰️〰️</span>
-                <span class="voice-dur">${(msg.voice_duration || 0).toFixed(1)}s</span>
-            </div>
-        `;
-    }
-
-    const isOwn = state.user && (msg.sender_id === state.user.user_id);
-    const deleteBtnHtml = isOwn ? `<button class="msg-delete-btn" onclick="deleteMsg('${msg.msg_id}', '${msg.target_type}', '${msg.target_id}')">🗑️</button>` : '';
-
-    group.innerHTML = `
-        ${avatarHtml}
-        <div class="msg-content-wrap">
-            <div class="msg-header">
-                <span class="msg-author">${escapeHtml(disp)}</span>
-                <span class="msg-timestamp">${dateStr}</span>
-                ${deleteBtnHtml}
-            </div>
-            ${msg.content ? `<div class="msg-text">${escapeHtml(msg.content)}</div>` : ''}
-            ${attachmentHtml}
-        </div>
-    `;
-
-    list.appendChild(group);
+    (data.messages || []).forEach(msg => appendMessage(msg));
     list.scrollTop = list.scrollHeight;
 }
 
-function deleteMsg(msgId, targetType, targetId) {
+function appendMessage(msg) {
+    const list = document.getElementById('messages-list');
+    const existing = document.getElementById(`msg-${msg.msg_id}`);
+    if (existing) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'message-group';
+    wrap.id = `msg-${msg.msg_id}`;
+
+    const dateStr = new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isMine = msg.sender_id === state.user?.user_id;
+
+    let mediaHtml = '';
+    if (msg.image_data) {
+        mediaHtml += `<div class="message-image"><img src="data:image/png;base64,${msg.image_data}" alt="Image" onclick="openLightbox(this.src)"></div>`;
+    }
+    if (msg.file_data) {
+        mediaHtml += `
+            <div class="message-file">
+                <div class="file-icon">📄</div>
+                <div class="file-info">
+                    <div class="file-name">${msg.file_name}</div>
+                    <div class="file-size">${formatBytes(msg.file_size)}</div>
+                </div>
+                <button class="btn-download" onclick="downloadAttachment('${msg.file_name}', '${msg.file_data}')">⬇ Download</button>
+            </div>
+        `;
+    }
+    if (msg.voice_data) {
+        mediaHtml += `
+            <div class="message-voice">
+                <button class="btn-voice-play" onclick="playVoiceMsg('${msg.voice_data}', ${msg.voice_duration || 0})">▶ Play (${(msg.voice_duration || 0).toFixed(1)}s)</button>
+            </div>
+        `;
+    }
+
+    const deleteBtn = isMine ? `<button class="btn-delete-msg" onclick="deleteMessage('${msg.msg_id}', '${msg.target_type}', '${msg.target_id}')" title="Delete message">&times;</button>` : '';
+
+    wrap.innerHTML = `
+        <div class="avatar-wrap">
+            <div class="avatar" style="background-color: #5865F2">${(msg.sender_name || 'U').charAt(0).toUpperCase()}</div>
+        </div>
+        <div class="message-content-wrap">
+            <div class="message-header">
+                <span class="message-sender">${msg.sender_name || 'User'}</span>
+                <span class="message-timestamp">${dateStr}</span>
+                ${deleteBtn}
+            </div>
+            ${msg.content ? `<div class="message-text">${escapeHtml(msg.content)}</div>` : ''}
+            ${mediaHtml}
+        </div>
+    `;
+
+    list.appendChild(wrap);
+    list.scrollTop = list.scrollHeight;
+}
+
+function deleteMessage(msgId, targetType, targetId) {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) el.remove();
     window.pywebview.api.delete_message(msgId, targetType, targetId);
 }
 
@@ -794,12 +1141,12 @@ function onMessageDeleted(data) {
     if (el) el.remove();
 }
 
-async function saveFile(filename, b64) {
+async function downloadAttachment(filename, b64) {
     const res = await window.pywebview.api.save_file_to_disk(filename, b64);
     if (res.success) {
-        showToast(`Downloaded to: ${res.path}`);
+        showToast(`Saved to ${res.path}`);
     } else {
-        showToast(`Save error: ${res.error}`);
+        showToast(`Failed to save: ${res.error}`);
     }
 }
 
@@ -807,41 +1154,37 @@ function playVoiceMsg(b64, dur) {
     window.pywebview.api.play_voice_message(b64, dur);
 }
 
-// ---------------- Voice Recording ----------------
+// ---------------- Voice Message Recording ----------------
 
-async function toggleVoiceRecording() {
+function toggleVoiceRecording() {
     const btn = document.getElementById('btn-voice-msg');
     if (!state.isRecordingVoice) {
         state.isRecordingVoice = true;
-        state.voiceRecordSeconds = 0;
         btn.classList.add('recording');
-        btn.textContent = '⏹️ 0:00';
+        state.voiceRecordStart = Date.now();
         window.pywebview.api.start_voice_record();
-
-        state.voiceTimerInterval = setInterval(() => {
-            state.voiceRecordSeconds++;
-            const m = Math.floor(state.voiceRecordSeconds / 60);
-            const s = state.voiceRecordSeconds % 60;
-            btn.textContent = `⏹️ ${m}:${s < 10 ? '0' : ''}${s}`;
-        }, 1000);
+        showToast('Recording voice message... Click again to send');
     } else {
-        clearInterval(state.voiceTimerInterval);
         state.isRecordingVoice = false;
         btn.classList.remove('recording');
-        btn.textContent = '🎙️';
-
-        const res = await window.pywebview.api.stop_voice_record();
-        if (res.data && res.duration > 0.3) {
-            const targetType = state.currentChannelId ? 'channel' : 'dm';
-            const targetId = state.currentChannelId || state.currentDmPeerId;
-            if (targetId) {
-                window.pywebview.api.send_chat_message(targetType, targetId, '', '', res.data, res.duration, '', '', 0);
-            }
-        }
+        stopAndSendVoiceMsg();
     }
 }
 
-// ---------------- 1-on-1 Direct Calls ----------------
+async function stopAndSendVoiceMsg() {
+    const res = await window.pywebview.api.stop_voice_record();
+    if (res && res.data && res.duration > 0.3) {
+        const targetType = state.currentDmPeerId ? 'dm' : 'channel';
+        const targetId = state.currentDmPeerId || state.currentChannelId;
+        if (targetId) {
+            window.pywebview.api.send_chat_message(targetType, targetId, '', '', res.data, res.duration, '', '', 0);
+        }
+    } else {
+        showToast('Voice message was too short.');
+    }
+}
+
+// ---------------- Direct Calls ----------------
 
 function onIncomingCall(data) {
     state.activeCallId = data.call_id;
@@ -866,7 +1209,6 @@ function declineIncomingCall() {
 }
 
 function onCallRinging(data) {
-    state.activeCallId = data.call_id;
     showToast('Calling...');
 }
 
@@ -916,7 +1258,6 @@ function renderVoiceStage(chName) {
     const grid = document.getElementById('voice-participants-grid');
     grid.innerHTML = '';
 
-    // Add local user
     if (state.user) {
         const card = document.createElement('div');
         card.className = 'voice-card';
@@ -929,98 +1270,77 @@ function renderVoiceStage(chName) {
     }
 }
 
+function onLocalSpeaking(data) {
+    if (!state.user) return;
+    const card = document.getElementById(`voice-card-${state.user.user_id}`);
+    if (card) {
+        card.classList.toggle('speaking', data.is_speaking);
+    }
+}
+
 function onPeerSpeaking(data) {
     const card = document.getElementById(`voice-card-${data.user_id}`);
     if (card) {
         card.classList.toggle('speaking', data.is_speaking);
     }
-    // Also update in DM call widget if active
-    const dmCard = document.getElementById('call-card-peer');
-    if (dmCard) {
-        dmCard.classList.toggle('speaking', data.is_speaking);
-    }
 }
 
-function onLocalSpeaking(data) {
-    if (state.user) {
-        const card = document.getElementById(`voice-card-${state.user.user_id}`);
-        if (card) card.classList.toggle('speaking', data.is_speaking);
-        const dmCard = document.getElementById('call-card-my');
-        if (dmCard) dmCard.classList.toggle('speaking', data.is_speaking);
-    }
-}
+// ---------------- Screen Sharing ----------------
 
-// ---------------- Screen Share ----------------
-
-let isScreenSharing = false;
 function toggleScreenShare() {
-    isScreenSharing = !isScreenSharing;
-    if (isScreenSharing) {
-        const targetType = state.currentVoiceChannelId ? 'channel' : 'dm';
-        const targetId = state.currentVoiceChannelId || state.activeCallId || state.currentDmPeerId;
+    state.isSharingScreen = !state.isSharingScreen;
+    const targetType = state.currentDmPeerId ? 'dm' : 'channel';
+    const targetId = state.currentDmPeerId || state.currentChannelId;
+
+    if (state.isSharingScreen) {
         window.pywebview.api.start_screen_share(targetType, targetId);
         showToast('Screen sharing started');
     } else {
         window.pywebview.api.stop_screen_share();
-        document.getElementById('voice-screen-stream-box').classList.add('hidden');
-        document.getElementById('dm-call-screen-container').classList.add('hidden');
         showToast('Screen sharing stopped');
+        document.getElementById('screen-share-stream-container').classList.add('hidden');
     }
 }
 
 function onScreenFrame(data) {
-    const src = `data:image/jpeg;base64,${data.frame}`;
-    if (state.activeCallId) {
-        const box = document.getElementById('dm-call-screen-container');
-        box.classList.remove('hidden');
-        document.getElementById('dm-call-screen-img').src = src;
-    } else {
-        const box = document.getElementById('voice-screen-stream-box');
-        box.classList.remove('hidden');
-        document.getElementById('voice-stage-screen-img').src = src;
+    const cont = document.getElementById('screen-share-stream-container');
+    const img = document.getElementById('screen-share-img');
+    if (cont && img) {
+        cont.classList.remove('hidden');
+        img.src = `data:image/jpeg;base64,${data.frame}`;
     }
 }
 
 function onScreenStop(data) {
-    document.getElementById('voice-screen-stream-box').classList.add('hidden');
-    document.getElementById('dm-call-screen-container').classList.add('hidden');
+    document.getElementById('screen-share-stream-container').classList.add('hidden');
+    showToast('Screen share ended by peer');
 }
 
-// ---------------- Mic & Deafen Toggles ----------------
+// ---------------- Audio Controls (Mute / Deafen) ----------------
 
 function toggleMic() {
     state.isMuted = !state.isMuted;
+    const btn = document.getElementById('btn-toggle-mic');
+    btn.classList.toggle('active', state.isMuted);
+    btn.title = state.isMuted ? t('unmute', 'Unmute') : t('mute', 'Mute');
     window.pywebview.api.set_mic_muted(state.isMuted);
-
-    const btn1 = document.getElementById('btn-toggle-mic');
-    btn1.classList.toggle('active-red', state.isMuted);
-    btn1.textContent = state.isMuted ? '🔇' : '🎙️';
-
-    const btn2 = document.getElementById('btn-stage-mute');
-    if (btn2) btn2.textContent = state.isMuted ? '🔇 Unmute' : '🎙️ Mute';
 }
 
 function toggleDeafen() {
     state.isDeafened = !state.isDeafened;
+    const btn = document.getElementById('btn-toggle-deafen');
+    btn.classList.toggle('active', state.isDeafened);
+    btn.title = state.isDeafened ? t('undeafen', 'Undeafen') : t('deafen', 'Deafen');
     window.pywebview.api.set_deafened(state.isDeafened);
-
-    const btn1 = document.getElementById('btn-toggle-deafen');
-    btn1.classList.toggle('active-red', state.isDeafened);
-    btn1.textContent = state.isDeafened ? '🔕' : '🎧';
-
-    const btn2 = document.getElementById('btn-stage-deafen');
-    if (btn2) btn2.textContent = state.isDeafened ? '🔕 Undeafen' : '🎧 Deafen';
 }
 
-// ---------------- Settings & PTT ----------------
+// ---------------- Settings & Preferences ----------------
 
 function openSettings() {
     document.getElementById('modal-settings').classList.remove('hidden');
     if (state.user) {
-        document.getElementById('settings-display-name').value = state.user.display_name || '';
-        document.getElementById('settings-bio').value = state.user.bio || '';
-        document.getElementById('settings-disp-preview').textContent = state.user.display_name || state.user.username;
-        document.getElementById('settings-user-preview').textContent = `@${state.user.username}`;
+        document.getElementById('setting-display-name').value = state.user.display_name || '';
+        document.getElementById('setting-bio').value = state.user.bio || '';
     }
 }
 
@@ -1028,37 +1348,37 @@ function closeSettings() {
     document.getElementById('modal-settings').classList.add('hidden');
 }
 
-function renderPttSettings(enabled, key) {
-    document.getElementById('radio-ptt').checked = enabled;
-    document.getElementById('radio-vad').checked = !enabled;
+function renderPttSettings(isPtt, key) {
+    document.getElementById('radio-ptt').checked = isPtt;
+    document.getElementById('radio-vad').checked = !isPtt;
     document.getElementById('ptt-key-display').textContent = key || 'Space';
+    document.getElementById('ptt-keybind-container').style.display = isPtt ? 'block' : 'none';
 }
 
 function updateInputMode(isPtt) {
     state.pttMode = isPtt;
+    document.getElementById('ptt-keybind-container').style.display = isPtt ? 'block' : 'none';
     window.pywebview.api.set_ptt_config(isPtt, state.pttKey);
 }
 
 function startRecordKeybind() {
-    const badge = document.getElementById('ptt-key-display');
-    badge.textContent = 'Press any key / mouse...';
-    badge.classList.add('pulsing');
+    const disp = document.getElementById('ptt-key-display');
+    disp.textContent = 'Press any key / mouse button...';
+    disp.style.borderColor = 'var(--accent)';
     window.pywebview.api.record_keybind_start();
 }
 
 function onKeybindCaptured(data) {
     state.pttKey = data.key;
-    state.pttMode = true;
-    const badge = document.getElementById('ptt-key-display');
-    badge.textContent = data.key;
-    badge.classList.remove('pulsing');
-    document.getElementById('radio-ptt').checked = true;
-    showToast(`Keybind saved: ${data.key}`);
+    const disp = document.getElementById('ptt-key-display');
+    disp.textContent = data.key;
+    disp.style.borderColor = 'var(--border-color)';
+    showToast(`Push-to-Talk key bound to: ${data.key}`);
 }
 
 function saveProfileSettings() {
-    const disp = document.getElementById('settings-display-name').value.trim();
-    const bio = document.getElementById('settings-bio').value.trim();
+    const disp = document.getElementById('setting-display-name').value.trim();
+    const bio = document.getElementById('setting-bio').value.trim();
     window.pywebview.api.update_profile(disp, '', '', '', '', '', bio);
     if (state.user) {
         state.user.display_name = disp;
@@ -1066,35 +1386,40 @@ function saveProfileSettings() {
         updateUserPanelProfile();
     }
     showToast('Profile updated!');
+    closeSettings();
 }
 
 function savePasswordChange() {
-    const oldP = document.getElementById('input-old-pass').value;
-    const newP = document.getElementById('input-new-pass').value;
+    const oldP = document.getElementById('setting-old-pass').value;
+    const newP = document.getElementById('setting-new-pass').value;
     if (!oldP || !newP) return;
     window.pywebview.api.change_password(oldP, newP);
-    document.getElementById('input-old-pass').value = '';
-    document.getElementById('input-new-pass').value = '';
-    showToast('Password update sent.');
+    document.getElementById('setting-old-pass').value = '';
+    document.getElementById('setting-new-pass').value = '';
+    showToast('Password change requested...');
 }
 
-function applyTheme(theme) {
-    document.body.className = `theme-${theme}`;
+function applyTheme(th) {
+    document.body.className = `theme-${th}`;
 }
 
-function applyLanguage(lang) {
-    state.language = lang;
+function applyLanguage(lng) {
+    state.language = lng;
     document.querySelectorAll('[data-i18n]').forEach(el => {
-        const k = el.dataset.i18n;
-        el.textContent = t(k, el.textContent);
+        const key = el.dataset.i18n;
+        if (I18N[lng] && I18N[lng][key]) {
+            el.textContent = I18N[lng][key];
+        }
     });
 }
 
 function populateAudioDevices(devs) {
     const inSel = document.getElementById('select-audio-input');
     const outSel = document.getElementById('select-audio-output');
-    inSel.innerHTML = '';
-    outSel.innerHTML = '';
+    if (!inSel || !outSel) return;
+
+    inSel.innerHTML = '<option value="">Default System Microphone</option>';
+    outSel.innerHTML = '<option value="">Default System Speakers</option>';
 
     (devs.inputs || []).forEach(d => {
         const opt = document.createElement('option');
@@ -1143,6 +1468,24 @@ function renderFriendsTab(tab) {
     filtered.forEach(f => {
         const row = document.createElement('div');
         row.className = 'friend-row';
+
+        let actionsHtml = '';
+        if (f.friendship_status === 'pending') {
+            if (f.is_incoming) {
+                actionsHtml = `
+                    <button class="circle-btn" title="Accept" onclick="acceptFriend('${f.peer_id}')" style="color: #23a55a;">✓</button>
+                    <button class="circle-btn" title="Decline" onclick="declineFriend('${f.peer_id}')" style="color: #f23f43;">✕</button>
+                `;
+            } else {
+                actionsHtml = `<span style="font-size: 12px; color: var(--text-muted); padding: 4px 8px;">Pending Outgoing</span>`;
+            }
+        } else {
+            actionsHtml = `
+                <button class="circle-btn" title="Message" onclick="selectDmUser('${f.peer_id}', '${f.peer_display_name || f.peer_name}')">💬</button>
+                <button class="circle-btn" title="Call" onclick="startCallUser('${f.peer_id}')">📞</button>
+            `;
+        }
+
         row.innerHTML = `
             <div class="friend-info">
                 <div class="avatar-wrap">
@@ -1155,12 +1498,19 @@ function renderFriendsTab(tab) {
                 </div>
             </div>
             <div class="friend-actions">
-                <button class="circle-btn" title="Message" onclick="selectDmUser('${f.peer_id}', '${f.peer_display_name || f.peer_name}')">💬</button>
-                <button class="circle-btn" title="Call" onclick="startCallUser('${f.peer_id}')">📞</button>
+                ${actionsHtml}
             </div>
         `;
         itemsCont.appendChild(row);
     });
+}
+
+function acceptFriend(peerId) {
+    window.pywebview.api.accept_friend_request(peerId);
+}
+
+function declineFriend(peerId) {
+    window.pywebview.api.decline_friend_request(peerId);
 }
 
 function startCallUser(peerId) {
@@ -1187,6 +1537,27 @@ function onFriendRequestResp(res) {
     showToast(res.message);
 }
 
+function onUserPresence(user) {
+    if (state.users[user.user_id]) {
+        Object.assign(state.users[user.user_id], user);
+    }
+    const fr = state.friends.find(f => f.peer_id === user.user_id);
+    if (fr) {
+        fr.is_online = user.is_online;
+        fr.status = user.status;
+    }
+    renderDmList();
+    const activeTab = document.querySelector('.friends-tab.active')?.dataset.tab || 'online';
+    renderFriendsTab(activeTab);
+}
+
+function onPong(data) {
+    const el = document.getElementById('voice-status-channel');
+    if (el && state.currentRoomId) {
+        el.textContent = `Connected / ${data.ping_ms}ms`;
+    }
+}
+
 // ---------------- Helpers & Toast ----------------
 
 function openLightbox(src) {
@@ -1200,20 +1571,26 @@ function showToast(text) {
     toast.className = 'toast';
     toast.textContent = text;
     cont.appendChild(toast);
-    setTimeout(() => toast.remove(), 3500);
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3200);
 }
 
 function formatBytes(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
 function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;')
-              .replace(/'/g, '&#039;');
+    return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    }[m]));
 }

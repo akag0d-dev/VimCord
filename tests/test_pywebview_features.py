@@ -96,16 +96,16 @@ class TestVimCordAPIBridge(unittest.TestCase):
         self.assertIn("audio_devices", state)
         self.assertIn("theme", state)
         self.assertIn("ptt_key", state)
-        api.hotkey_mgr.stop()
-        api.tray.stop()
+        api._hotkey_mgr.stop()
+        api._tray.stop()
 
     def test_ptt_config_update(self):
         api = VimCordAPI()
         api.set_ptt_config(True, "Mouse 4")
-        self.assertTrue(api.audio_manager.ptt_mode)
-        self.assertEqual(api.hotkey_mgr.ptt_key, "Mouse 4")
-        api.hotkey_mgr.stop()
-        api.tray.stop()
+        self.assertTrue(api._audio_manager.ptt_mode)
+        self.assertEqual(api._hotkey_mgr.ptt_key, "Mouse 4")
+        api._hotkey_mgr.stop()
+        api._tray.stop()
 
 
 if __name__ == "__main__":

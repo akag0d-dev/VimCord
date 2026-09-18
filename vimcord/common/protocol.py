@@ -7,6 +7,7 @@ import struct
 import time
 from typing import Optional, Tuple, Dict, Any
 
+DEFAULT_HOST = "194.226.123.199"
 DEFAULT_TCP_PORT = 9988
 DEFAULT_UDP_PORT = 9989
 

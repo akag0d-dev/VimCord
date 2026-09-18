@@ -114,6 +114,13 @@ body {
     margin-right: 6px;
     font-size: 14px;
 }
+.app-titlebar-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    vertical-align: middle;
+    object-fit: contain;
+}
 .app-title {
     color: var(--text-bright);
     margin-right: 8px;
@@ -1143,6 +1150,18 @@ body {
     display: none !important;
 }
 
+/* Dedicated Login View Container */
+#auth-container {
+    width: 100vw;
+    height: calc(100vh - 30px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary);
+    padding: 16px;
+    box-sizing: border-box;
+}
+
 /* Login Card */
 .modal-card {
     background: var(--bg-card);
@@ -1156,8 +1175,13 @@ body {
     text-align: center;
 }
 .modal-logo {
-    font-size: 36px;
     margin-bottom: 8px;
+}
+.login-logo-img {
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+    border-radius: 12px;
 }
 .modal-title {
     color: var(--text-bright);
