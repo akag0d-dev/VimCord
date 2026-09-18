@@ -35,11 +35,23 @@ def get_config_file() -> Path:
     return get_appdata_dir() / "config.json"
 
 
+def get_resource_path(rel_path: str = "") -> Path:
+    """Returns absolute path to a bundled resource, handling PyInstaller frozen bundles."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base_dir = Path(sys._MEIPASS)
+    else:
+        # 3 levels up from vimcord/client/config.py is root repository directory
+        base_dir = Path(__file__).resolve().parents[2]
+    return base_dir / rel_path if rel_path else base_dir
+
+
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "host": "194.226.123.199",
     "tcp_port": DEFAULT_TCP_PORT,
     "udp_port": DEFAULT_UDP_PORT,
     "username": "",
+    "saved_username": "",
     "saved_password": "",
     "auto_login": False,
     "language": "en",

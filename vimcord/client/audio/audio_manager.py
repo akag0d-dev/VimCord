@@ -7,7 +7,7 @@ import logging
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Any
 import numpy as np
 import sounddevice as sd
 
@@ -436,6 +436,21 @@ class AudioManager:
 
     def is_peer_muted(self, user_id: str) -> bool:
         return user_id in self.peer_muted
+
+    @staticmethod
+    def get_available_devices() -> Dict[str, Any]:
+        """Returns lists of available input and output devices."""
+        inputs = []
+        outputs = []
+        try:
+            for idx, d in enumerate(sd.query_devices()):
+                if d.get("max_input_channels", 0) > 0:
+                    inputs.append({"id": idx, "name": d.get("name", f"Mic {idx}")})
+                if d.get("max_output_channels", 0) > 0:
+                    outputs.append({"id": idx, "name": d.get("name", f"Speaker {idx}")})
+        except Exception as e:
+            logger.debug(f"Error querying audio devices: {e}")
+        return {"inputs": inputs, "outputs": outputs}
 
     def set_ptt_mode(self, enabled: bool):
         self.ptt_mode = enabled

@@ -89,13 +89,14 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
         self.db = Database(db_path)
         self.db.register_user("direct_user", "my_secret_pass")
         self.state = ServerState(self.db)
-        self.tcp_server = TCPServer(self.state, "127.0.0.1", 29977)
+        self.tcp_server = TCPServer(self.state, "127.0.0.1", 0)
         self.tcp_srv = await asyncio.start_server(
             self.tcp_server.handle_client,
             "127.0.0.1",
-            29977,
+            0,
             limit=64 * 1024 * 1024
         )
+        self.port = self.tcp_srv.sockets[0].getsockname()[1]
 
     async def asyncTearDown(self):
         self.tcp_srv.close()
@@ -107,13 +108,13 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
         return decode_json_message(line.decode("utf-8").strip())
 
     async def test_direct_login_without_precheck_no_unbound_error(self):
-        reader, writer = await asyncio.open_connection("127.0.0.1", 29977)
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
         req = {
             "type": "login",
             "username": "direct_user",
             "password": "my_secret_pass"
         }
-        writer.write(encode_json_message(req).encode("utf-8") + b"\n")
+        writer.write(encode_json_message(req))
         await writer.drain()
 
         resp = await self._read_json(reader)
@@ -125,13 +126,13 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
         await writer.wait_closed()
 
     async def test_wrong_password_does_not_crash_connection(self):
-        reader, writer = await asyncio.open_connection("127.0.0.1", 29977)
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
         req = {
             "type": "login",
             "username": "direct_user",
             "password": "wrong_password"
         }
-        writer.write(encode_json_message(req).encode("utf-8") + b"\n")
+        writer.write(encode_json_message(req))
         await writer.drain()
 
         resp = await self._read_json(reader)
@@ -143,7 +144,7 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
             "username": "direct_user",
             "password": "my_secret_pass"
         }
-        writer.write(encode_json_message(req2).encode("utf-8") + b"\n")
+        writer.write(encode_json_message(req2))
         await writer.drain()
 
         resp2 = await self._read_json(reader)
@@ -154,17 +155,17 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
         await writer.wait_closed()
 
     async def test_large_file_message_transfer(self):
-        r1, w1 = await asyncio.open_connection("127.0.0.1", 29977)
-        r2, w2 = await asyncio.open_connection("127.0.0.1", 29977)
+        r1, w1 = await asyncio.open_connection("127.0.0.1", self.port, limit=64 * 1024 * 1024)
+        r2, w2 = await asyncio.open_connection("127.0.0.1", self.port, limit=64 * 1024 * 1024)
 
         self.db.register_user("user_two", "pass2")
 
-        w1.write(encode_json_message({"type": "login", "username": "direct_user", "password": "my_secret_pass"}).encode("utf-8") + b"\n")
+        w1.write(encode_json_message({"type": "login", "username": "direct_user", "password": "my_secret_pass"}))
         await w1.drain()
         u1_resp = await self._read_json(r1)
         u1_id = u1_resp["user_id"]
 
-        w2.write(encode_json_message({"type": "login", "username": "user_two", "password": "pass2"}).encode("utf-8") + b"\n")
+        w2.write(encode_json_message({"type": "login", "username": "user_two", "password": "pass2"}))
         await w2.drain()
         u2_resp = await self._read_json(r2)
         u2_id = u2_resp["user_id"]
@@ -179,13 +180,13 @@ class TestDirectLoginAndLargePayload(unittest.IsolatedAsyncioTestCase):
             "file_name": "large_archive.zip",
             "file_size": 2 * 1024 * 1024
         }
-        w1.write(encode_json_message(msg_req).encode("utf-8") + b"\n")
+        w1.write(encode_json_message(msg_req))
         await w1.drain()
 
         chat_msg = None
         for _ in range(5):
             incoming = await self._read_json(r2)
-            if incoming.get("type") == "chat_msg":
+            if incoming.get("type") in ("new_msg", "chat_msg"):
                 chat_msg = incoming
                 break
 

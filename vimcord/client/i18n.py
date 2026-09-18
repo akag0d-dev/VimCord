@@ -61,6 +61,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "confirm_delete_channel": "Are you sure you want to delete channel #{name}?",
         "chat": "Chat",
         "no_friends_yet": "No friends yet\nGo to the 'Friends' tab to add friends 👥",
+        "tray_open": "Open VimCord",
+        "tray_quit": "Quit VimCord",
+        "pasted_from_clipboard": "Pasted from clipboard",
+        "mouse_3": "Mouse 3 (Middle)",
+        "mouse_4": "Mouse 4 (Side Back)",
+        "mouse_5": "Mouse 5 (Side Forward)",
     },
     "ru": {
         "app_title": "VimCord",
@@ -117,6 +123,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "confirm_delete_channel": "Вы уверены, что хотите удалить канал #{name}?",
         "chat": "Чат",
         "no_friends_yet": "Пока нет друзей\nПерейдите во вкладку 'Друзья' чтобы добавить друзей 👥",
+        "tray_open": "Открыть VimCord",
+        "tray_quit": "Полностью выйти",
+        "pasted_from_clipboard": "Вставлено из буфера обмена",
+        "mouse_3": "Мышь 3 (Средняя)",
+        "mouse_4": "Мышь 4 (Боковая назад)",
+        "mouse_5": "Мышь 5 (Боковая вперед)",
     }
 }
 

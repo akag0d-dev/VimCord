@@ -10,63 +10,64 @@ import socket
 import threading
 import time
 from typing import Dict, Any, Optional
-from PyQt6.QtCore import QObject, pyqtSignal
+from vimcord.client.signals import Signal
 from vimcord.common.protocol import encode_json_message, decode_json_message
 
 logger = logging.getLogger("VimCord.TCPClient")
 
 
-class TCPClientSignals(QObject):
-    connected = pyqtSignal()
-    disconnected = pyqtSignal()
-    error = pyqtSignal(str)
+class TCPClientSignals:
+    def __init__(self):
+        self.connected = Signal()
+        self.disconnected = Signal()
+        self.error = Signal(str)
 
-    # Auth events
-    register_response = pyqtSignal(bool, str)     # success, message
-    login_response = pyqtSignal(bool, dict)       # success, full_resp_data
-    user_presence = pyqtSignal(dict)              # user_dict
+        # Auth events
+        self.register_response = Signal(bool, str)     # success, message
+        self.login_response = Signal(bool, dict)       # success, full_resp_data
+        self.user_presence = Signal(dict)              # user_dict
 
-    # Rooms & channels
-    room_created = pyqtSignal(dict)               # room_dict
-    room_deleted = pyqtSignal(str)                # room_id
-    channel_created = pyqtSignal(str, dict)       # room_id, channel_dict
-    channel_deleted = pyqtSignal(str, str)        # room_id, channel_id
-    channel_renamed = pyqtSignal(str, str, str)   # room_id, channel_id, new_name
-    voice_state_update = pyqtSignal(dict)         # dict with user_id, room_id, channel_id, action
+        # Rooms & channels
+        self.room_created = Signal(dict)               # room_dict
+        self.room_deleted = Signal(str)                # room_id
+        self.channel_created = Signal(str, dict)       # room_id, channel_dict
+        self.channel_deleted = Signal(str, str)        # room_id, channel_id
+        self.channel_renamed = Signal(str, str, str)   # room_id, channel_id, new_name
+        self.voice_state_update = Signal(dict)         # dict with user_id, room_id, channel_id, action
 
-    # Chat & history
-    chat_message = pyqtSignal(dict)               # message dict
-    message_deleted = pyqtSignal(str, str, str)   # msg_id, target_type, target_id
-    history_response = pyqtSignal(str, str, list) # target_type, target_id, messages list
+        # Chat & history
+        self.chat_message = Signal(dict)               # message dict
+        self.message_deleted = Signal(str, str, str)   # msg_id, target_type, target_id
+        self.history_response = Signal(str, str, list) # target_type, target_id, messages list
 
-    # Invites & Friends
-    room_invite_created = pyqtSignal(str, str)    # room_id, code
-    room_invite_joined = pyqtSignal(bool, dict)   # success, room_data_or_error
-    leave_room_resp = pyqtSignal(bool, str, str)  # success, message, room_id
-    room_members_resp = pyqtSignal(str, list)     # room_id, members_list
-    friends_update = pyqtSignal(list)             # list of friend dicts
-    friend_request_resp = pyqtSignal(bool, str)   # success, message
+        # Invites & Friends
+        self.room_invite_created = Signal(str, str)    # room_id, code
+        self.room_invite_joined = Signal(bool, dict)   # success, room_data_or_error
+        self.leave_room_resp = Signal(bool, str, str)  # success, message, room_id
+        self.room_members_resp = Signal(str, list)     # room_id, members_list
+        self.friends_update = Signal(list)             # list of friend dicts
+        self.friend_request_resp = Signal(bool, str)   # success, message
 
-    # Latency / Ping
-    pong = pyqtSignal(float)                      # echoed timestamp
+        # Latency / Ping
+        self.pong = Signal(float)                      # echoed timestamp
 
-    # Profile & settings
-    profile_update_resp = pyqtSignal(bool, str, dict) # success, message, user_dict
-    profile_resp = pyqtSignal(bool, dict)             # success, profile_dict_or_error
-    user_media_state = pyqtSignal(dict)               # user_id, is_muted, is_deafened
-    change_password_resp = pyqtSignal(bool, str)      # success, message
+        # Profile & settings
+        self.profile_update_resp = Signal(bool, str, dict) # success, message, user_dict
+        self.profile_resp = Signal(bool, dict)             # success, profile_dict_or_error
+        self.user_media_state = Signal(dict)               # user_id, is_muted, is_deafened
+        self.change_password_resp = Signal(bool, str)      # success, message
 
-    # 1-on-1 Call events
-    incoming_call = pyqtSignal(str, str, str)     # call_id, from_user_id, from_username
-    call_ringing = pyqtSignal(str, str)           # call_id, target_user_id
-    call_accepted = pyqtSignal(str, str, str)     # call_id, peer_id, peer_name
-    call_declined = pyqtSignal(str)               # call_id
-    call_ended = pyqtSignal(str)                  # call_id
-    call_failed = pyqtSignal(str)                 # reason
+        # 1-on-1 Call events
+        self.incoming_call = Signal(str, str, str)     # call_id, from_user_id, from_username
+        self.call_ringing = Signal(str, str)           # call_id, target_user_id
+        self.call_accepted = Signal(str, str, str)     # call_id, peer_id, peer_name
+        self.call_declined = Signal(str)               # call_id
+        self.call_ended = Signal(str)                  # call_id
+        self.call_failed = Signal(str)                 # reason
 
-    # Screen sharing
-    screen_frame = pyqtSignal(str, bytes)         # sender_id, raw_jpeg_bytes
-    screen_stop = pyqtSignal(str)                 # sender_id
+        # Screen sharing
+        self.screen_frame = Signal(str, bytes)         # sender_id, raw_jpeg_bytes
+        self.screen_stop = Signal(str)                 # sender_id
 
 
 class TCPClient:
@@ -111,17 +112,27 @@ class TCPClient:
             self.sock = None
         self.signals.disconnected.emit()
 
-    def send_message(self, msg: Dict[str, Any]):
-        """Sends a JSON-encoded message line to the server."""
+    def send_message(self, msg: Dict[str, Any], async_send: bool = False):
+        """Sends a JSON-encoded message line to the server without blocking UI."""
         if not self.sock or not self._is_running:
             return
-        try:
-            data = encode_json_message(msg)
-            with self._write_lock:
-                self.sock.sendall(data)
-        except Exception as e:
-            logger.error(f"Error sending message: {e}")
-            self.disconnect()
+
+        def _do_send():
+            try:
+                data = encode_json_message(msg)
+                with self._write_lock:
+                    if self.sock and self._is_running:
+                        self.sock.sendall(data)
+            except Exception as e:
+                logger.error(f"Error sending message: {e}")
+                self.disconnect()
+
+        # If payload contains large data (> 50KB like photos/files) or async requested, send off-thread
+        has_large_field = any(len(v) > 50000 for k, v in msg.items() if isinstance(v, (str, bytes)))
+        if async_send or has_large_field:
+            threading.Thread(target=_do_send, daemon=True).start()
+        else:
+            _do_send()
 
     def send_register(self, username: str, password: str):
         self.send_message({"type": "register", "username": username, "password": password})

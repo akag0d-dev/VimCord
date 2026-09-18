@@ -1,19 +1,19 @@
 """
 Screen Sharing capture and streaming engine for VimCord.
-Uses non-blocking main-thread window grab with offloaded background JPEG compression
-in a QThread worker to completely eliminate UI lag, cross-thread pixmap crashes,
-and Windows mouse cursor flickering.
-Persists resolution, FPS, and quality settings in client config.
+Uses cross-platform mss screen capture and Pillow JPEG compression in a daemon thread.
+No Qt dependency.
 """
 
+import io
 import logging
-import queue
+import threading
 import time
 from typing import Optional, Callable
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, QByteArray, QBuffer, QIODevice, Qt, QTimer
-from PyQt6.QtGui import QGuiApplication, QImage, QPixmap
+import mss
+from PIL import Image
 
 from vimcord.client.config import load_config, save_config
+from vimcord.client.signals import Signal
 from vimcord.common.protocol import pack_udp_audio, UDP_TYPE_SCREEN_FRAME
 
 logger = logging.getLogger("VimCord.ScreenShare")
@@ -25,95 +25,17 @@ RESOLUTION_PRESETS = {
 }
 
 
-class ScreenCompressWorker(QThread):
-    """
-    Background worker that receives raw QImage frames, scales them,
-    and encodes them into JPEG bytes off the GUI thread.
-    """
-    frame_ready = pyqtSignal(bytes)
-
-    def __init__(self, res_width: int, res_height: int, quality: int, parent=None):
-        super().__init__(parent)
-        self.res_width = res_width
-        self.res_height = res_height
-        self.quality = quality
-        self.is_running = False
-        self._queue: queue.Queue = queue.Queue(maxsize=1)
-
-    def update_settings(self, width: int, height: int, quality: int):
-        self.res_width = width
-        self.res_height = height
-        self.quality = max(20, min(85, quality))
-
-    def submit_frame(self, img: QImage):
-        if not self.is_running:
-            return
-        # Discard older frame if worker is busy to keep latency ultra-low
-        try:
-            if self._queue.full():
-                try:
-                    self._queue.get_nowait()
-                except queue.Empty:
-                    pass
-            self._queue.put_nowait(img)
-        except Exception:
-            pass
-
-    def stop(self):
-        self.is_running = False
-        try:
-            self._queue.put_nowait(None)
-        except Exception:
-            pass
-
-    def run(self):
-        self.is_running = True
-        logger.info(f"Screen compress worker started ({self.res_width}x{self.res_height}, Q={self.quality})")
-
-        while self.is_running:
-            try:
-                img = self._queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
-
-            if img is None or not self.is_running:
-                break
-
-            try:
-                scaled = img.scaled(
-                    self.res_width, self.res_height,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation
-                )
-                byte_arr = QByteArray()
-                buffer = QBuffer(byte_arr)
-                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-                scaled.save(buffer, "JPEG", self.quality)
-                jpeg_data = bytes(byte_arr.data())
-                if jpeg_data and self.is_running:
-                    self.frame_ready.emit(jpeg_data)
-            except Exception as e:
-                logger.debug(f"Screen compression error: {e}")
-
-        logger.info("Screen compress worker terminated")
-
-
-class ScreenCapturer(QObject):
-    frame_captured = pyqtSignal(bytes)
-
-    def __init__(self, send_func: Optional[Callable[[bytes], None]] = None, parent=None):
-        super().__init__(parent)
+class ScreenCapturer:
+    def __init__(self, send_func: Optional[Callable[[bytes], None]] = None):
         self.send_func = send_func
         self.on_frame_ready: Optional[Callable[[str, str, bytes], None]] = None
+        self.frame_captured = Signal(bytes)
         self.is_sharing: bool = False
         self.user_id: str = ""
         self.target_id: str = ""
         self.target_type: str = "channel"
         self._seq: int = 0
-        self.worker: Optional[ScreenCompressWorker] = None
-
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._on_timer_tick)
+        self._thread: Optional[threading.Thread] = None
 
         # Load persisted settings from client config
         cfg = load_config()
@@ -121,14 +43,14 @@ class ScreenCapturer(QObject):
         if preset not in RESOLUTION_PRESETS:
             preset = "720p"
         self.current_preset = preset
-        self.fps = min(30, max(5, int(cfg.get("stream_fps", 30))))
+        self.fps = min(30, max(5, int(cfg.get("stream_fps", 15))))
         self.quality = int(cfg.get("stream_quality", 45))
 
         w, h = RESOLUTION_PRESETS.get(self.current_preset, (1280, 720))
         self.res_width = w
         self.res_height = h
 
-    def set_stream_settings(self, resolution: str = "720p", fps: int = 30, quality: int = 45):
+    def set_stream_settings(self, resolution: str = "720p", fps: int = 15, quality: int = 45):
         """Sets resolution preset, FPS, and JPEG quality, and persists them to config."""
         if resolution in RESOLUTION_PRESETS:
             self.current_preset = resolution
@@ -138,12 +60,6 @@ class ScreenCapturer(QObject):
 
         self.fps = max(5, min(30, fps))
         self.quality = max(20, min(85, quality))
-
-        if self._timer.isActive():
-            self._timer.setInterval(max(10, int(1000 / self.fps)))
-
-        if self.worker and self.worker.isRunning():
-            self.worker.update_settings(self.res_width, self.res_height, self.quality)
 
         try:
             cfg = load_config()
@@ -162,39 +78,44 @@ class ScreenCapturer(QObject):
         self.target_type = target_type
         self.is_sharing = True
 
-        if self.worker:
-            self.worker.stop()
-            self.worker.wait(300)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.5)
 
-        self.worker = ScreenCompressWorker(self.res_width, self.res_height, self.quality, self)
-        self.worker.frame_ready.connect(self._on_worker_frame)
-        self.worker.start()
-
-        interval_ms = max(10, int(1000 / self.fps))
-        self._timer.start(interval_ms)
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread.start()
         logger.info(f"Screen sharing started: target {target_id} ({target_type}), {self.res_width}x{self.res_height} @ {self.fps} FPS")
 
     def stop_sharing(self):
         self.is_sharing = False
-        self._timer.stop()
-
-        if self.worker:
-            self.worker.stop()
-            self.worker.wait(300)
-            self.worker = None
-
         self.target_id = ""
         logger.info("Screen sharing stopped")
 
-    def _on_timer_tick(self):
-        if not self.is_sharing or not self.worker:
-            return
-        screen = QGuiApplication.primaryScreen()
-        if not screen:
-            return
-        pixmap = screen.grabWindow(0)
-        if not pixmap.isNull():
-            self.worker.submit_frame(pixmap.toImage())
+    def _capture_loop(self):
+        try:
+            with mss.mss() as sct:
+                monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                while self.is_sharing:
+                    t0 = time.time()
+                    try:
+                        sct_img = sct.grab(monitor)
+                        img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                        if img.size != (self.res_width, self.res_height):
+                            img = img.resize((self.res_width, self.res_height), Image.Resampling.BILINEAR)
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", quality=self.quality)
+                        jpeg_data = buf.getvalue()
+                        if jpeg_data and self.is_sharing:
+                            self._on_worker_frame(jpeg_data)
+                    except Exception as e:
+                        logger.debug(f"Screen capture frame error: {e}")
+
+                    elapsed = time.time() - t0
+                    interval = 1.0 / self.fps
+                    sleep_time = interval - elapsed
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+        except Exception as e:
+            logger.error(f"Error in screen capture loop: {e}")
 
     def _on_worker_frame(self, jpeg_data: bytes):
         if not self.is_sharing or not self.user_id or not self.target_id:

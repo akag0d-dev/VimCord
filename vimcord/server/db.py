@@ -388,7 +388,20 @@ class Database:
         """Computes a canonical target_id for 1-on-1 private messaging."""
         return f"dm:{min(uid1, uid2)}:{max(uid1, uid2)}"
 
-    def save_message(self, msg_id: str, target_type: str, target_id: str, sender_id: str, sender_name: str, content: str, timestamp: float, image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0):
+    def save_message(self, msg_id: Optional[str] = None, target_type: str = "channel", target_id: str = "", sender_id: str = "", sender_name: str = "", content: str = "", timestamp: Optional[float] = None, image_data: str = "", voice_data: str = "", voice_duration: float = 0.0, file_data: str = "", file_name: str = "", file_size: int = 0) -> str:
+        import uuid
+        import time
+        if not msg_id:
+            msg_id = str(uuid.uuid4())
+        if timestamp is None:
+            timestamp = time.time()
+        if not sender_name and sender_id:
+            u = self.get_user_by_id(sender_id)
+            if u:
+                sender_name = u.get("display_name") or u.get("username", "")
+        if target_type == "dm" and sender_id and target_id and not target_id.startswith("dm:"):
+            target_id = self.get_canonical_dm_id(sender_id, target_id)
+
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -399,6 +412,7 @@ class Database:
                 (msg_id, target_type, target_id, sender_id, sender_name, content, timestamp, image_data, voice_data, voice_duration, file_data, file_name, file_size)
             )
             conn.commit()
+        return msg_id
 
     def delete_message(self, msg_id: str, user_id: str) -> bool:
         """Deletes a message if sent by user_id."""
@@ -408,7 +422,22 @@ class Database:
             conn.commit()
             return cur.rowcount > 0
 
-    def get_messages(self, target_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_messages(self, target_id: str, limit: Any = 100, *args, peer_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
+        actual_target = target_id
+        actual_limit = 100
+        if target_id == "dm":
+            user_a = limit if isinstance(limit, str) else (args[0] if args else "")
+            if peer_id:
+                actual_target = self.get_canonical_dm_id(user_a, peer_id)
+            else:
+                actual_target = user_a
+            actual_limit = args[1] if len(args) > 1 else 100
+        else:
+            if isinstance(limit, int):
+                actual_limit = limit
+            if peer_id:
+                actual_target = self.get_canonical_dm_id(target_id, peer_id)
+
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -429,7 +458,7 @@ class Database:
                 ORDER BY m.timestamp ASC
                 LIMIT ?
                 """,
-                (target_id, limit)
+                (actual_target, actual_limit)
             )
             return [dict(row) for row in cur.fetchall()]
 

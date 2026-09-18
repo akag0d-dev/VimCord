@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VimCord</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="theme-dark">
+    <!-- Window Titlebar -->
+    <div id="titlebar">
+        <div class="titlebar-drag">
+            <span class="app-icon">🎙️</span>
+            <span class="app-title">VimCord</span>
+            <span id="titlebar-sub"></span>
+        </div>
+        <div class="titlebar-controls">
+            <button class="tb-btn tb-min" id="btn-win-min" title="Minimize">&#8211;</button>
+            <button class="tb-btn tb-max" id="btn-win-max" title="Maximize">&#9633;</button>
+            <button class="tb-btn tb-close" id="btn-win-close" title="Close to Tray">&#10005;</button>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div id="app-container">
+        <!-- 1. Left Server Rail (72px) -->
+        <nav id="server-rail">
+            <button class="rail-btn home-btn active" id="btn-rail-home" title="Direct Messages">
+                <span class="rail-icon">@</span>
+                <div class="pill-indicator"></div>
+            </button>
+            <div class="rail-separator"></div>
+            <div id="server-rail-list"></div>
+            <button class="rail-btn add-server-btn" id="btn-rail-add" title="Create a Server">
+                <span class="rail-icon">+</span>
+            </button>
+            <button class="rail-btn join-server-btn" id="btn-rail-join" title="Join Server via Invite">
+                <span class="rail-icon">🔗</span>
+            </button>
+        </nav>
+
+        <!-- 2. Sidebar (240px) -->
+        <aside id="sidebar">
+            <div id="sidebar-header">
+                <div id="sidebar-title">Direct Messages</div>
+                <button id="btn-create-channel" class="header-icon-btn hidden" title="Create Channel">+</button>
+                <button id="btn-server-invite" class="header-icon-btn hidden" title="Server Invite">🔗</button>
+            </div>
+
+            <div id="sidebar-content">
+                <!-- Home Sidebar -->
+                <div id="home-sidebar" class="sidebar-section">
+                    <button class="sidebar-item active" id="btn-tab-friends">
+                        <span class="item-icon">👥</span>
+                        <span class="item-name" data-i18n="friends">Friends</span>
+                        <span id="pending-badge" class="badge hidden">0</span>
+                    </button>
+                    <div class="sidebar-subheader" data-i18n="direct_messages">DIRECT MESSAGES</div>
+                    <div id="dm-list"></div>
+                </div>
+
+                <!-- Server Sidebar -->
+                <div id="server-sidebar" class="sidebar-section hidden">
+                    <div class="sidebar-subheader" data-i18n="text_channels">TEXT CHANNELS</div>
+                    <div id="text-channel-list"></div>
+                    <div class="sidebar-subheader" data-i18n="voice_channels">VOICE CHANNELS</div>
+                    <div id="voice-channel-list"></div>
+                </div>
+            </div>
+
+            <!-- Voice Connected Bar -->
+            <div id="voice-status-bar" class="hidden">
+                <div class="voice-status-left">
+                    <div class="voice-status-icon">📶</div>
+                    <div class="voice-status-info">
+                        <div class="voice-status-title" data-i18n="voice_connected">Voice Connected</div>
+                        <div id="voice-status-channel" class="voice-status-sub">General / 24ms</div>
+                    </div>
+                </div>
+                <div class="voice-status-actions">
+                    <button id="btn-voice-screenshare" class="voice-action-btn" title="Screen Share">🖥️</button>
+                    <button id="btn-voice-disconnect" class="voice-action-btn disconnect-btn" title="Disconnect">📞</button>
+                </div>
+            </div>
+
+            <!-- User Profile Bottom Bar -->
+            <div id="user-panel">
+                <div id="user-panel-profile">
+                    <div class="avatar-wrap">
+                        <div id="user-panel-avatar" class="avatar"></div>
+                        <div class="status-dot status-online"></div>
+                    </div>
+                    <div class="user-panel-names">
+                        <div id="user-panel-display" class="name-display">User</div>
+                        <div id="user-panel-sub" class="name-sub">@user</div>
+                    </div>
+                </div>
+                <div class="user-panel-controls">
+                    <button id="btn-toggle-mic" class="control-btn" title="Mute Microphone">🎙️</button>
+                    <button id="btn-toggle-deafen" class="control-btn" title="Deafen Audio">🎧</button>
+                    <button id="btn-open-settings" class="control-btn" title="Settings">⚙️</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 3. Main Workspace Area -->
+        <main id="main-content">
+            <header id="main-header">
+                <div class="header-left">
+                    <span id="channel-header-icon" class="header-prefix">#</span>
+                    <span id="channel-header-title" class="header-title">general</span>
+                    <span id="channel-header-desc" class="header-desc"></span>
+                </div>
+                <div class="header-right">
+                    <button id="btn-header-call" class="header-btn hidden" title="Start Call">📞</button>
+                    <button id="btn-toggle-members" class="header-btn" title="Toggle Member List">👥</button>
+                </div>
+            </header>
+
+            <div id="workspace-container">
+                <!-- View 1: Friends View -->
+                <div id="view-friends" class="workspace-view">
+                    <div class="friends-nav">
+                        <div class="friends-tabs">
+                            <span class="friends-tab-title" data-i18n="friends">Friends</span>
+                            <div class="tab-divider"></div>
+                            <button class="friends-tab active" data-tab="online" data-i18n="online">Online</button>
+                            <button class="friends-tab" data-tab="all" data-i18n="all">All</button>
+                            <button class="friends-tab" data-tab="pending" data-i18n="pending">Pending</button>
+                            <button class="friends-tab tab-add" data-tab="add" data-i18n="add_friend">Add Friend</button>
+                        </div>
+                    </div>
+                    <div id="friends-tab-content">
+                        <div id="friends-list-container">
+                            <div class="search-box">
+                                <input type="text" id="friends-search" placeholder="Search friends...">
+                            </div>
+                            <div class="friends-count-label" id="friends-count-label">ONLINE — 0</div>
+                            <div id="friends-items-list"></div>
+                        </div>
+                        <div id="friends-add-container" class="hidden">
+                            <h3 data-i18n="add_friend">ADD FRIEND</h3>
+                            <p class="add-desc">You can add friends with their VimCord username.</p>
+                            <div class="add-friend-input-box">
+                                <input type="text" id="input-add-friend-name" placeholder="Enter username...">
+                                <button id="btn-send-friend-req" class="btn-primary">Send Friend Request</button>
+                            </div>
+                            <div id="add-friend-status" class="status-msg"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- View 2: Chat View -->
+                <div id="view-chat" class="workspace-view hidden">
+                    <!-- Direct Call Widget -->
+                    <div id="dm-call-widget" class="hidden">
+                        <div class="dm-call-header">
+                            <div class="dm-call-title">
+                                <span class="dm-call-pulsing-dot"></span>
+                                <span id="dm-call-status-text">In Call</span>
+                                <span id="dm-call-timer">00:00</span>
+                            </div>
+                            <div class="dm-call-controls">
+                                <button id="btn-call-screenshare" class="call-ctrl-btn" title="Share Screen">🖥️</button>
+                                <button id="btn-call-end" class="call-ctrl-btn call-end-btn" title="End Call">📞</button>
+                            </div>
+                        </div>
+                        <div class="dm-call-stage">
+                            <div class="dm-call-card" id="call-card-peer">
+                                <div class="call-avatar" id="call-peer-avatar"></div>
+                                <div class="call-name" id="call-peer-name">User</div>
+                            </div>
+                            <div class="dm-call-card" id="call-card-my">
+                                <div class="call-avatar" id="call-my-avatar"></div>
+                                <div class="call-name" id="call-my-name">You</div>
+                            </div>
+                            <div id="dm-call-screen-container" class="hidden">
+                                <img id="dm-call-screen-img" alt="Screen Stream">
+                                <div class="screen-streamer-tag" id="dm-call-streamer-name">Stream</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Messages Feed -->
+                    <div id="chat-messages-container">
+                        <div id="chat-messages-list"></div>
+                    </div>
+
+                    <!-- Chat Input Composer -->
+                    <div id="chat-composer">
+                        <div id="attachment-preview-strip" class="hidden">
+                            <div class="preview-thumbnail-box">
+                                <img id="preview-thumb-img" class="preview-thumb hidden" alt="Thumb">
+                                <div id="preview-thumb-icon" class="preview-thumb-icon">📄</div>
+                            </div>
+                            <div class="preview-details">
+                                <div id="preview-filename" class="preview-name">file.png</div>
+                                <div id="preview-filesize" class="preview-size">1.2 MB</div>
+                            </div>
+                            <button id="btn-clear-attachment" class="preview-clear-btn" title="Remove attachment">&#10005;</button>
+                        </div>
+                        <div class="composer-box">
+                            <button id="btn-attach-file" class="composer-action-btn" title="Attach File (max 25MB)">+</button>
+                            <input type="text" id="chat-text-input" placeholder="Send message... (Paste image or file with Ctrl+V)">
+                            <button id="btn-voice-msg" class="composer-action-btn voice-record-btn" title="Voice Message">🎙️</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- View 3: Voice Stage View -->
+                <div id="view-voice-stage" class="workspace-view hidden">
+                    <div id="voice-stage-content">
+                        <div id="voice-screen-stream-box" class="hidden">
+                            <img id="voice-stage-screen-img" alt="Screen Broadcast">
+                            <div class="screen-overlay-bar">
+                                <span id="voice-stage-streamer-label">Screen Share</span>
+                            </div>
+                        </div>
+                        <div id="voice-participants-grid"></div>
+                    </div>
+                    <div id="voice-stage-controls">
+                        <button id="btn-stage-mute" class="stage-ctrl-btn">🎙️ <span data-i18n="mute_mic">Mute</span></button>
+                        <button id="btn-stage-deafen" class="stage-ctrl-btn">🎧 <span data-i18n="deafen_audio">Deafen</span></button>
+                        <button id="btn-stage-screen" class="stage-ctrl-btn">🖥️ <span data-i18n="screen_share">Screen</span></button>
+                        <button id="btn-stage-leave" class="stage-ctrl-btn btn-danger">📞 <span data-i18n="disconnect">Disconnect</span></button>
+                    </div>
+                </div>
+
+                <!-- Collapsible Member List -->
+                <aside id="member-sidebar">
+                    <div id="members-list-content"></div>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- 1. Login/Register Modal -->
+    <div id="modal-login" class="modal-overlay">
+        <div class="modal-card login-card">
+            <div class="modal-logo">🎙️</div>
+            <h2 class="modal-title">Welcome to VimCord</h2>
+            <div class="login-tabs">
+                <button class="login-tab-btn active" id="tab-btn-login">Login</button>
+                <button class="login-tab-btn" id="tab-btn-register">Register</button>
+            </div>
+            <form id="form-auth">
+                <div class="input-group">
+                    <label>SERVER HOST</label>
+                    <input type="text" id="auth-host" value="127.0.0.1" required>
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>TCP PORT</label>
+                        <input type="number" id="auth-tcp" value="9988" required>
+                    </div>
+                    <div class="input-group">
+                        <label>UDP PORT</label>
+                        <input type="number" id="auth-udp" value="9989" required>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>USERNAME</label>
+                    <input type="text" id="auth-username" required autocomplete="username">
+                </div>
+                <div class="input-group">
+                    <label>PASSWORD</label>
+                    <input type="password" id="auth-password" required autocomplete="current-password">
+                </div>
+                <div class="input-row-check" id="row-auto-login">
+                    <label><input type="checkbox" id="auth-autologin" checked> Auto-login on startup</label>
+                </div>
+                <div id="auth-error" class="error-text hidden"></div>
+                <button type="submit" id="btn-auth-submit" class="btn-primary btn-block">Log In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. Settings Modal -->
+    <div id="modal-settings" class="modal-overlay hidden">
+        <div class="settings-dialog">
+            <div class="settings-sidebar">
+                <div class="settings-header-label" data-i18n="user_settings">USER SETTINGS</div>
+                <button class="settings-nav-item active" data-tab="account" data-i18n="about_me">My Account</button>
+                <button class="settings-nav-item" data-tab="voice" data-i18n="voice_channel">Voice & Video</button>
+                <button class="settings-nav-item" data-tab="appearance">Appearance</button>
+                <div class="settings-divider"></div>
+                <button class="settings-nav-item item-logout" id="btn-settings-logout">Log Out</button>
+            </div>
+            <div class="settings-content">
+                <div class="settings-close-wrap">
+                    <button class="settings-close-btn" id="btn-close-settings">&#10005; ESC</button>
+                </div>
+
+                <!-- Account Settings -->
+                <div id="settings-tab-account" class="settings-page">
+                    <h2 data-i18n="about_me">My Account</h2>
+                    <div class="profile-preview-card">
+                        <div id="settings-banner-preview" class="profile-banner-top"></div>
+                        <div class="profile-avatar-row">
+                            <div id="settings-avatar-preview" class="profile-avatar-large"></div>
+                            <div class="profile-names">
+                                <div id="settings-disp-preview" class="profile-disp">User</div>
+                                <div id="settings-user-preview" class="profile-user">@user</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <label data-i18n="display_name">DISPLAY NAME</label>
+                        <input type="text" id="settings-display-name">
+                    </div>
+                    <div class="settings-section">
+                        <label data-i18n="about_me">ABOUT ME (BIO)</label>
+                        <textarea id="settings-bio" rows="2"></textarea>
+                    </div>
+                    <div class="settings-section">
+                        <label>AVATAR COLOR</label>
+                        <div class="color-palette" id="avatar-color-palette"></div>
+                    </div>
+                    <div class="settings-section">
+                        <label data-i18n="banner_color">BANNER COLOR</label>
+                        <div class="color-palette" id="banner-color-palette"></div>
+                    </div>
+                    <h3 style="margin-top: 16px;">Change Password</h3>
+                    <div class="input-row">
+                        <input type="password" id="input-old-pass" placeholder="Current Password">
+                        <input type="password" id="input-new-pass" placeholder="New Password">
+                    </div>
+                    <button class="btn-secondary" id="btn-save-password" style="margin-top: 8px;">Update Password</button>
+                    <div style="margin-top: 16px;">
+                        <button class="btn-primary" id="btn-save-profile">Save Profile Changes</button>
+                    </div>
+                </div>
+
+                <!-- Voice & Video Settings -->
+                <div id="settings-tab-voice" class="settings-page hidden">
+                    <h2>Voice & Video Settings</h2>
+                    <div class="settings-section">
+                        <label>INPUT DEVICE (MICROPHONE)</label>
+                        <select id="select-audio-input"></select>
+                    </div>
+                    <div class="settings-section">
+                        <label>OUTPUT DEVICE (SPEAKERS / HEADPHONES)</label>
+                        <select id="select-audio-output"></select>
+                    </div>
+                    <div class="settings-section">
+                        <label>INPUT MODE</label>
+                        <div class="radio-card-group">
+                            <label class="radio-card">
+                                <input type="radio" name="input_mode" value="vad" id="radio-vad" checked>
+                                <div>
+                                    <div class="radio-title">Voice Activity</div>
+                                    <div class="radio-sub">Automatically transmits voice when speaking</div>
+                                </div>
+                            </label>
+                            <label class="radio-card">
+                                <input type="radio" name="input_mode" value="ptt" id="radio-ptt">
+                                <div>
+                                    <div class="radio-title">Push to Talk (PTT)</div>
+                                    <div class="radio-sub">Transmits only when assigned keybind is held down</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section" id="ptt-keybind-container">
+                        <label>SHORTCUT (KEYBIND)</label>
+                        <div class="keybind-recorder-box">
+                            <div id="ptt-key-display" class="key-badge">Space</div>
+                            <button id="btn-record-keybind" class="btn-secondary" data-i18n="record_keybind">Record Keybind</button>
+                        </div>
+                        <p class="settings-hint">Works in full-screen games, in any language layout, and supports Mouse 3, 4, 5!</p>
+                    </div>
+                    <div class="settings-section">
+                        <label>MIC TEST</label>
+                        <div class="mic-test-wrap">
+                            <button id="btn-test-mic" class="btn-secondary">Let's Check</button>
+                            <div class="mic-level-meter">
+                                <div id="mic-level-bar" class="mic-level-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Appearance Settings -->
+                <div id="settings-tab-appearance" class="settings-page hidden">
+                    <h2>Appearance</h2>
+                    <div class="settings-section">
+                        <label>THEME</label>
+                        <div class="theme-options">
+                            <label class="theme-card">
+                                <input type="radio" name="theme_select" value="dark" checked>
+                                <div>Dark (Default)</div>
+                            </label>
+                            <label class="theme-card">
+                                <input type="radio" name="theme_select" value="amoled">
+                                <div>Midnight (AMOLED)</div>
+                            </label>
+                            <label class="theme-card">
+                                <input type="radio" name="theme_select" value="light">
+                                <div>Light</div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <label>LANGUAGE / ЯЗЫК</label>
+                        <div class="lang-options">
+                            <label class="theme-card">
+                                <input type="radio" name="lang_select" value="en" checked>
+                                <div>English</div>
+                            </label>
+                            <label class="theme-card">
+                                <input type="radio" name="lang_select" value="ru">
+                                <div>Русский</div>
+                            </label>
+                        </div>
+                        <p class="settings-hint">Updates all labels and System Tray menu items immediately.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Incoming Call Modal -->
+    <div id="modal-incoming-call" class="modal-overlay hidden">
+        <div class="modal-card incoming-call-card">
+            <div class="caller-avatar-pulse">
+                <div id="incoming-caller-avatar" class="avatar-large"></div>
+            </div>
+            <h2 id="incoming-caller-name">Alice</h2>
+            <p>Incoming VimCord Call...</p>
+            <div class="incoming-call-actions">
+                <button id="btn-accept-call" class="btn-circle btn-call-accept" title="Accept">📞</button>
+                <button id="btn-decline-call" class="btn-circle btn-call-decline" title="Decline">✕</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Create Room / Channel Modal -->
+    <div id="modal-prompt" class="modal-overlay hidden">
+        <div class="modal-card prompt-card">
+            <h3 id="prompt-title">Create Channel</h3>
+            <p id="prompt-desc">Enter name:</p>
+            <input type="text" id="prompt-input" style="width: 100%; margin: 12px 0;">
+            <div class="modal-actions">
+                <button id="btn-prompt-cancel" class="btn-secondary">Cancel</button>
+                <button id="btn-prompt-confirm" class="btn-primary">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. Lightbox Modal -->
+    <div id="lightbox-modal" class="modal-overlay hidden">
+        <div class="lightbox-content">
+            <img id="lightbox-img" src="" alt="Full view">
+            <button id="btn-close-lightbox" class="lightbox-close">&#10005;</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

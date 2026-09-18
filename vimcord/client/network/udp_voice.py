@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 from typing import Optional
-from PyQt6.QtCore import QObject, pyqtSignal
+from vimcord.client.signals import Signal
 
 from vimcord.common.protocol import (
     pack_udp_audio,
@@ -27,9 +27,10 @@ from vimcord.client.audio.audio_manager import AudioManager
 logger = logging.getLogger("VimCord.UDPVoice")
 
 
-class UDPVoiceSignals(QObject):
-    peer_speaking = pyqtSignal(str, bool)       # user_id, is_speaking
-    screen_frame_received = pyqtSignal(str, bytes)  # sender_id, jpeg_bytes
+class UDPVoiceSignals:
+    def __init__(self):
+        self.peer_speaking = Signal(str, bool)       # user_id, is_speaking
+        self.screen_frame_received = Signal(str, bytes)  # sender_id, jpeg_bytes
 
 
 class UDPVoiceClient:
