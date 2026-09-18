@@ -51,13 +51,32 @@
         <!-- 2. Sidebar (240px) -->
         <aside id="sidebar">
             <div id="sidebar-header">
-                <div id="sidebar-title">Direct Messages</div>
+                <div class="sidebar-header-left" id="btn-server-header">
+                    <div id="sidebar-title">Direct Messages</div>
+                    <span class="material-symbols-outlined header-arrow-icon hidden" id="sidebar-server-arrow">expand_more</span>
+                </div>
                 <div class="sidebar-header-actions">
                     <button id="btn-create-channel" class="header-icon-btn hidden" title="Create Channel">
                         <span class="material-symbols-outlined">add</span>
                     </button>
                     <button id="btn-server-invite" class="header-icon-btn hidden" title="Server Invite">
                         <span class="material-symbols-outlined">person_add</span>
+                    </button>
+                </div>
+                <!-- Server Options Dropdown Menu -->
+                <div id="server-options-popup" class="options-popup hidden">
+                    <button class="options-popup-item" id="menu-opt-create-channel">
+                        <span class="material-symbols-outlined">add_circle</span> Create Channel
+                    </button>
+                    <button class="options-popup-item" id="menu-opt-invite">
+                        <span class="material-symbols-outlined">person_add</span> Invite People
+                    </button>
+                    <div class="options-popup-divider"></div>
+                    <button class="options-popup-item item-danger hidden" id="menu-opt-delete-server">
+                        <span class="material-symbols-outlined">delete</span> Delete Server
+                    </button>
+                    <button class="options-popup-item item-danger hidden" id="menu-opt-leave-server">
+                        <span class="material-symbols-outlined">logout</span> Leave Server
                     </button>
                 </div>
             </div>
@@ -258,14 +277,6 @@
                         <div id="voice-participants-grid"></div>
                     </div>
                     <div id="voice-stage-controls">
-                        <button id="btn-stage-mute" class="stage-ctrl-btn">
-                            <span class="material-symbols-outlined">mic</span>
-                            <span data-i18n="mute_mic">Mute</span>
-                        </button>
-                        <button id="btn-stage-deafen" class="stage-ctrl-btn">
-                            <span class="material-symbols-outlined">headphones</span>
-                            <span data-i18n="deafen_audio">Deafen</span>
-                        </button>
                         <button id="btn-stage-screen" class="stage-ctrl-btn">
                             <span class="material-symbols-outlined">screen_share</span>
                             <span data-i18n="screen_share">Screen</span>
@@ -374,7 +385,7 @@
                             </div>
                             <div class="profile-names">
                                 <div id="settings-disp-preview" class="profile-disp">User</div>
-                                <div id="settings-user-preview" class="profile-user">@user • ID: u-12345678</div>
+                                <div id="settings-user-preview" class="profile-user">@user</div>
                                 <div id="settings-status-preview" class="profile-status-badge">Online</div>
                             </div>
                         </div>
@@ -654,6 +665,53 @@
             <button id="btn-close-lightbox" class="lightbox-close">
                 <span class="material-symbols-outlined">close</span>
             </button>
+        </div>
+    </div>
+
+    <!-- 6. Custom Confirmation Dialog (Replaces native browser confirm()) -->
+    <div id="modal-confirm" class="modal-overlay hidden">
+        <div class="modal-card confirm-card">
+            <h3 id="confirm-title" class="confirm-title">Are you sure?</h3>
+            <p id="confirm-message" class="confirm-desc">Do you really want to perform this action? This cannot be undone.</p>
+            <div class="modal-actions confirm-actions">
+                <button id="btn-confirm-cancel" class="btn-secondary">Cancel</button>
+                <button id="btn-confirm-ok" class="btn-danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. User Profile Card Modal (View Other / Self Accounts) -->
+    <div id="modal-user-profile" class="modal-overlay hidden">
+        <div class="profile-modal-card">
+            <div class="profile-modal-banner" id="user-profile-banner">
+                <button class="profile-modal-close" id="btn-close-user-profile" title="Close">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="profile-modal-body">
+                <div class="profile-modal-avatar-wrap">
+                    <div class="profile-modal-avatar" id="user-profile-avatar"></div>
+                    <div class="status-dot status-offline profile-modal-status-dot" id="user-profile-status-dot"></div>
+                </div>
+                <div class="profile-modal-info">
+                    <div class="profile-modal-display-name" id="user-profile-display-name">Username</div>
+                    <div class="profile-modal-username" id="user-profile-username">@username</div>
+                    <div class="profile-modal-badge" id="user-profile-status-badge">Offline</div>
+                </div>
+                <div class="profile-modal-divider"></div>
+                <div class="profile-modal-section">
+                    <div class="profile-modal-label">ABOUT ME</div>
+                    <div class="profile-modal-bio" id="user-profile-bio">No bio set.</div>
+                </div>
+                <div class="profile-modal-actions" id="user-profile-actions">
+                    <button class="btn-primary profile-action-btn" id="btn-profile-send-msg">
+                        <span class="material-symbols-outlined">chat</span> Send Message
+                    </button>
+                    <button class="btn-secondary profile-action-btn" id="btn-profile-call">
+                        <span class="material-symbols-outlined">call</span> Call
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 

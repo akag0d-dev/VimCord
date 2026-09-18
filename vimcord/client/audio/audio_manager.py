@@ -230,6 +230,22 @@ class AudioManager:
 
         self.stop_desktop_audio_capture()
 
+    def set_muted(self, muted: bool):
+        """Sets mic mute state and plays audio chime."""
+        self.is_muted = bool(muted)
+        try:
+            self.play_mute_chime(self.is_muted)
+        except Exception:
+            pass
+
+    def set_deafened(self, deafened: bool):
+        """Sets audio deafened state and plays audio chime."""
+        self.is_deafened = bool(deafened)
+        try:
+            self.play_deafen_chime(self.is_deafened)
+        except Exception:
+            pass
+
     def start_desktop_audio_capture(self):
         """Captures system/desktop audio during screen sharing to transmit screen sound."""
         if getattr(self, "_desktop_stream", None) is not None or getattr(self, "_desktop_pyaudio_stream", None) is not None:

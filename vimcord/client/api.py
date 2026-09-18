@@ -566,14 +566,14 @@ class VimCordAPI:
     # ---------------- Audio & Settings ----------------
 
     def set_mic_muted(self, muted: bool):
-        self._is_muted = muted
-        self._audio_manager.set_muted(muted)
-        self._tcp_client.send_user_media_state(muted, self._is_deafened)
+        self._is_muted = bool(muted)
+        self._audio_manager.set_muted(self._is_muted)
+        self._tcp_client.send_user_media_state(self._is_muted, self._is_deafened)
 
     def set_deafened(self, deafened: bool):
-        self._is_deafened = deafened
-        self._audio_manager.set_deafened(deafened)
-        self._tcp_client.send_user_media_state(self._is_muted, deafened)
+        self._is_deafened = bool(deafened)
+        self._audio_manager.set_deafened(self._is_deafened)
+        self._tcp_client.send_user_media_state(self._is_muted, self._is_deafened)
 
     def set_peer_volume(self, peer_id: str, volume: float):
         self._audio_manager.set_peer_volume(peer_id, volume)
@@ -609,6 +609,7 @@ class VimCordAPI:
         self.dispatch_event("mic_test_level", {"level": 0, "speaking": False})
 
     def set_stream_settings(self, resolution: str, fps: int, quality: int):
+        self._screen_capturer.set_stream_settings(resolution, fps, quality)
         save_config({
             "stream_resolution": resolution,
             "stream_fps": int(fps),
@@ -622,18 +623,31 @@ class VimCordAPI:
     # ---------------- Screen Sharing ----------------
 
     def start_screen_share(self, target_type: str, target_id: str):
-        self._screen_capturer.start_sharing(target_type, target_id)
+        self._screen_capturer.start_sharing(self._my_user_id, target_id, target_type)
 
     def stop_screen_share(self, target_type: str = "channel", target_id: str = ""):
         self._screen_capturer.stop_sharing()
-        if self._udp_voice:
+        if hasattr(self._udp_voice, "stop_screen_share"):
             self._udp_voice.stop_screen_share()
         if target_id:
-            self._tcp_client.send_screen_stop(target_type, target_id)
+            try:
+                self._tcp_client.send_screen_stop(target_type, target_id)
+            except Exception:
+                pass
 
     def _on_screen_frame_captured(self, target_type: str, target_id: str, jpeg_data: bytes):
-        b64 = base64.b64encode(jpeg_data).decode("ascii")
-        self.dispatch_event("local_screen_frame", {"frame": b64})
+        # Transmit frame over TCP
+        try:
+            self._tcp_client.send_screen_frame(target_type, target_id, jpeg_data)
+        except Exception as e:
+            logger.debug(f"Failed to send screen frame: {e}")
+
+        # Throttle local frame dispatch so evaluate_js does not flood WebView2
+        now = time.time()
+        if not hasattr(self, "_last_local_preview_time") or (now - self._last_local_preview_time) > 0.08:
+            self._last_local_preview_time = now
+            b64 = base64.b64encode(jpeg_data).decode("ascii")
+            self.dispatch_event("local_screen_frame", {"frame": b64})
 
     def _on_received_screen_frame(self, sender_id: str, jpeg_bytes: bytes):
         b64 = base64.b64encode(jpeg_bytes).decode("ascii")

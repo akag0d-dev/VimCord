@@ -256,6 +256,7 @@ body {
     flex-shrink: 0;
 }
 #sidebar-header {
+    position: relative;
     height: 48px;
     padding: 0 16px;
     display: flex;
@@ -265,6 +266,25 @@ body {
     font-weight: bold;
     font-size: 15px;
     color: var(--text-bright);
+}
+.sidebar-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    overflow: hidden;
+    flex: 1;
+}
+.sidebar-header-left:hover #sidebar-title {
+    color: #ffffff;
+}
+.header-arrow-icon {
+    font-size: 20px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+.header-arrow-icon.open {
+    transform: rotate(180deg);
 }
 .header-icon-btn {
     background: transparent;
@@ -1245,7 +1265,15 @@ body {
     margin-bottom: 6px;
     letter-spacing: 0.5px;
 }
-.input-group input, .settings-section input, .settings-section textarea, .settings-section select {
+.input-group input, 
+.settings-section input, 
+.settings-section textarea, 
+.settings-section select,
+.settings-select,
+.prompt-card input,
+.prompt-card select,
+.add-friend-input-box input,
+.search-box input {
     width: 100%;
     background: var(--bg-input);
     border: 1px solid var(--border-input);
@@ -1254,9 +1282,38 @@ body {
     color: var(--text-bright);
     font-size: 14px;
     outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
-.input-group input:focus, .settings-section input:focus {
+.input-group input:focus, 
+.settings-section input:focus,
+.settings-section textarea:focus,
+.settings-section select:focus,
+.settings-select:focus,
+.prompt-card input:focus,
+.prompt-card select:focus,
+.add-friend-input-box input:focus,
+.search-box input:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+select, .settings-select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-color: var(--bg-input);
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23949ba4'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 20px;
+    padding-right: 32px !important;
+    cursor: pointer;
+}
+select option, .settings-select option {
+    background: var(--bg-card);
+    color: var(--text-bright);
+    padding: 8px;
 }
 .input-row {
     display: flex;
@@ -1844,3 +1901,286 @@ body {
     from { transform: translateX(100%); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
 }
+
+/* Green Speaking Ring (Discord-Style) */
+#user-panel-avatar.speaking {
+    box-shadow: 0 0 0 2.5px var(--green), 0 0 8px rgba(35, 165, 90, 0.6) !important;
+}
+.avatar.speaking, .voice-avatar.speaking, .voice-card.speaking .voice-card-avatar {
+    box-shadow: 0 0 0 2.5px var(--green), 0 0 8px rgba(35, 165, 90, 0.6) !important;
+}
+
+/* Server Options Dropdown Menu */
+.options-popup {
+    position: absolute;
+    top: 46px;
+    left: 8px;
+    right: 8px;
+    background: var(--bg-nav);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.options-popup.hidden {
+    display: none !important;
+}
+.options-popup-item {
+    background: transparent;
+    border: none;
+    color: var(--text-normal);
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+    width: 100%;
+}
+.options-popup-item:hover {
+    background: var(--accent);
+    color: #fff;
+}
+.options-popup-item.item-danger {
+    color: var(--red);
+}
+.options-popup-item.item-danger:hover {
+    background: var(--red);
+    color: #fff;
+}
+.options-popup-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+/* Confirmation Dialog */
+.confirm-card {
+    max-width: 440px;
+    width: 90%;
+    background: var(--bg-card);
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+    border: 1px solid var(--border-color);
+    text-align: left;
+}
+.confirm-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+}
+.confirm-desc {
+    font-size: 14px;
+    color: var(--text-normal);
+    line-height: 1.5;
+    margin-bottom: 24px;
+}
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+.btn-danger {
+    background: var(--red);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.btn-danger:hover {
+    background: var(--red-hover);
+}
+
+/* User Profile Modal */
+.profile-modal-card {
+    width: 360px;
+    background: var(--bg-sidebar);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.7);
+    border: 1px solid var(--border-color);
+    animation: popIn 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+@keyframes popIn {
+    from { transform: scale(0.92); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+.profile-modal-banner {
+    height: 110px;
+    background-color: var(--accent);
+    background-size: cover;
+    background-position: center;
+    position: relative;
+}
+.profile-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.5);
+    border: none;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.profile-modal-close:hover {
+    background: rgba(0,0,0,0.8);
+}
+.profile-modal-close .material-symbols-outlined {
+    font-size: 18px;
+}
+.profile-modal-body {
+    padding: 0 16px 20px 16px;
+    position: relative;
+}
+.profile-modal-avatar-wrap {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin-top: -42px;
+    margin-bottom: 12px;
+}
+.profile-modal-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background-color: var(--accent);
+    border: 6px solid var(--bg-sidebar);
+    background-size: cover;
+    background-position: center;
+}
+.profile-modal-status-dot {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    border: 3px solid var(--bg-sidebar);
+}
+.profile-modal-info {
+    margin-bottom: 12px;
+}
+.profile-modal-display-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+.profile-modal-username {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.profile-modal-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(88, 101, 242, 0.15);
+    color: var(--accent);
+    margin-top: 6px;
+}
+.profile-modal-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 12px 0;
+}
+.profile-modal-section {
+    background: var(--bg-panel);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 14px;
+}
+.profile-modal-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+.profile-modal-bio {
+    font-size: 13px;
+    color: var(--text-normal);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.profile-modal-actions {
+    display: flex;
+    gap: 8px;
+}
+.profile-action-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+.profile-action-btn .material-symbols-outlined {
+    font-size: 16px;
+}
+
+/* Channel Action Buttons (Rename & Delete on hover) */
+.channel-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.channel-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    flex: 1;
+}
+.channel-actions {
+    display: none;
+    align-items: center;
+    gap: 4px;
+}
+.channel-item:hover .channel-actions {
+    display: flex;
+}
+.channel-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.channel-action-btn:hover {
+    color: var(--text-bright);
+    background: var(--bg-hover);
+}
+.channel-action-btn.btn-delete:hover {
+    color: var(--red);
+}
+.channel-action-btn .material-symbols-outlined {
+    font-size: 15px;
+}
+

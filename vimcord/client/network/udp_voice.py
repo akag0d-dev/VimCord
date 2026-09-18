@@ -164,6 +164,10 @@ class UDPVoiceClient:
     def send_screen_packet(self, data: bytes):
         self._send_raw(data)
 
+    def stop_screen_share(self):
+        """Safe cleanup when stopping screen share."""
+        pass
+
     def send_screen_frame_chunks(self, target_id: str, jpeg_data: bytes):
         """Slices JPEG data into MTU-safe 1200-byte UDP datagram chunks and transmits them."""
         if not self._is_running or not self.sock or not self.user_id:

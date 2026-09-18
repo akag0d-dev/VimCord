@@ -247,9 +247,7 @@ function bindDomEvents() {
 
     // User Panel Controls
     document.getElementById('btn-toggle-mic').onclick = toggleMic;
-    document.getElementById('btn-stage-mute').onclick = toggleMic;
     document.getElementById('btn-toggle-deafen').onclick = toggleDeafen;
-    document.getElementById('btn-stage-deafen').onclick = toggleDeafen;
     document.getElementById('btn-open-settings').onclick = openSettings;
     document.getElementById('user-panel-profile').onclick = openSettings;
 
@@ -381,6 +379,117 @@ function bindDomEvents() {
     document.getElementById('btn-close-lightbox').onclick = () => {
         document.getElementById('lightbox-modal').classList.add('hidden');
     };
+
+    // User Profile Modal
+    const btnCloseProfile = document.getElementById('btn-close-user-profile');
+    if (btnCloseProfile) btnCloseProfile.onclick = closeUserProfileModal;
+
+    // Server Options Dropdown Menu
+    const btnServerHeader = document.getElementById('btn-server-header');
+    const popupServerOpts = document.getElementById('server-options-popup');
+    const arrowServer = document.getElementById('sidebar-server-arrow');
+
+    if (btnServerHeader && popupServerOpts) {
+        btnServerHeader.onclick = (e) => {
+            if (state.activeTab !== 'server' || !state.currentRoomId) return;
+            e.stopPropagation();
+            const isHidden = popupServerOpts.classList.contains('hidden');
+            if (isHidden) {
+                const room = state.rooms[state.currentRoomId];
+                const isOwner = room && room.owner_id === state.user?.user_id;
+                document.getElementById('menu-opt-delete-server').classList.toggle('hidden', !isOwner);
+                document.getElementById('menu-opt-leave-server').classList.toggle('hidden', isOwner);
+
+                popupServerOpts.classList.remove('hidden');
+                if (arrowServer) arrowServer.classList.add('open');
+            } else {
+                popupServerOpts.classList.add('hidden');
+                if (arrowServer) arrowServer.classList.remove('open');
+            }
+        };
+
+        document.addEventListener('click', (e) => {
+            if (popupServerOpts && !popupServerOpts.contains(e.target) && !btnServerHeader.contains(e.target)) {
+                popupServerOpts.classList.add('hidden');
+                if (arrowServer) arrowServer.classList.remove('open');
+            }
+        });
+
+        document.getElementById('menu-opt-create-channel').onclick = () => {
+            popupServerOpts.classList.add('hidden');
+            if (arrowServer) arrowServer.classList.remove('open');
+            promptCreateChannel();
+        };
+
+        document.getElementById('menu-opt-invite').onclick = () => {
+            popupServerOpts.classList.add('hidden');
+            if (arrowServer) arrowServer.classList.remove('open');
+            promptServerInvite();
+        };
+
+        document.getElementById('menu-opt-delete-server').onclick = () => {
+            popupServerOpts.classList.add('hidden');
+            if (arrowServer) arrowServer.classList.remove('open');
+            const room = state.rooms[state.currentRoomId];
+            if (!room) return;
+            showConfirmModal({
+                title: 'Delete Server',
+                message: `Are you sure you want to delete server "${room.name}"? This action cannot be undone.`,
+                confirmText: 'Delete Server',
+                isDanger: true,
+                onConfirm: () => {
+                    window.pywebview.api.delete_room(room.room_id);
+                }
+            });
+        };
+
+        document.getElementById('menu-opt-leave-server').onclick = () => {
+            popupServerOpts.classList.add('hidden');
+            if (arrowServer) arrowServer.classList.remove('open');
+            const room = state.rooms[state.currentRoomId];
+            if (!room) return;
+            showConfirmModal({
+                title: 'Leave Server',
+                message: `Are you sure you want to leave server "${room.name}"? You will need an invite to rejoin.`,
+                confirmText: 'Leave Server',
+                isDanger: true,
+                onConfirm: () => {
+                    window.pywebview.api.leave_room(room.room_id);
+                }
+            });
+        };
+    }
+
+    // Global ESC key listener to dismiss any open modals
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const confirmModal = document.getElementById('modal-confirm');
+            if (confirmModal && !confirmModal.classList.contains('hidden')) {
+                confirmModal.classList.add('hidden');
+                return;
+            }
+            const profileModal = document.getElementById('modal-user-profile');
+            if (profileModal && !profileModal.classList.contains('hidden')) {
+                closeUserProfileModal();
+                return;
+            }
+            const promptModal = document.getElementById('modal-prompt');
+            if (promptModal && !promptModal.classList.contains('hidden')) {
+                closePromptModal();
+                return;
+            }
+            const settingsModal = document.getElementById('modal-settings');
+            if (settingsModal && !settingsModal.classList.contains('hidden')) {
+                closeSettings();
+                return;
+            }
+            const lightboxModal = document.getElementById('lightbox-modal');
+            if (lightboxModal && !lightboxModal.classList.contains('hidden')) {
+                lightboxModal.classList.add('hidden');
+                return;
+            }
+        }
+    });
 }
 
 // ---------------- Clipboard & Drag/Drop Handlers ----------------
@@ -676,9 +785,29 @@ function onLoginResponse(res) {
 
     state.user = res.data;
     state.rooms = {};
-    (res.data.rooms || []).forEach(r => state.rooms[r.room_id] = r);
+    state.voiceUsers = {};
     state.users = {};
     (res.data.users || []).forEach(u => state.users[u.user_id] = u);
+    (res.data.rooms || []).forEach(r => {
+        state.rooms[r.room_id] = r;
+        (r.channels || []).forEach(ch => {
+            if (ch.voice_users && Array.isArray(ch.voice_users)) {
+                state.voiceUsers[ch.channel_id] = ch.voice_users.map(uid => {
+                    const u = state.users[uid] || { user_id: uid, username: uid, display_name: uid };
+                    return {
+                        user_id: uid,
+                        username: u.username || uid,
+                        display_name: u.display_name || u.username || uid,
+                        avatar_color: u.avatar_color || '#5865F2',
+                        avatar_image: u.avatar_image || '',
+                        is_muted: false,
+                        is_deafened: false,
+                        is_speaking: false
+                    };
+                });
+            }
+        });
+    });
     state.friends = res.data.friends || [];
 
     updateUserPanelProfile();
@@ -707,13 +836,19 @@ function onRegisterResponse(res) {
 }
 
 function doLogout() {
-    if (confirm("Are you sure you want to log out of your account?")) {
-        closeSettings();
-        document.getElementById('app-container').classList.add('hidden');
-        document.getElementById('auth-container').classList.remove('hidden');
-        state.user = null;
-        window.pywebview.api.logout();
-    }
+    showConfirmModal({
+        title: 'Log Out',
+        message: 'Are you sure you want to log out of your account?',
+        confirmText: 'Log Out',
+        isDanger: true,
+        onConfirm: () => {
+            closeSettings();
+            document.getElementById('app-container').classList.add('hidden');
+            document.getElementById('auth-container').classList.remove('hidden');
+            state.user = null;
+            window.pywebview.api.logout();
+        }
+    });
 }
 
 // ---------------- Profile & User Panel ----------------
@@ -740,11 +875,16 @@ function updateUserPanelProfile() {
 function switchMode(mode, targetId = null) {
     state.activeTab = mode;
     const homeRailBtn = document.getElementById('btn-rail-home');
+    const arrowEl = document.getElementById('sidebar-server-arrow');
+    const popupEl = document.getElementById('server-options-popup');
+    if (popupEl) popupEl.classList.add('hidden');
+    if (arrowEl) arrowEl.classList.remove('open');
 
     if (mode === 'home') {
         homeRailBtn.classList.add('active');
         document.querySelectorAll('.server-rail-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('sidebar-title').textContent = t('direct_messages', 'Direct Messages');
+        if (arrowEl) arrowEl.classList.add('hidden');
         document.getElementById('home-sidebar').classList.remove('hidden');
         document.getElementById('server-sidebar').classList.add('hidden');
         document.getElementById('btn-create-channel').classList.add('hidden');
@@ -759,6 +899,7 @@ function switchMode(mode, targetId = null) {
         if (!room) return;
 
         document.getElementById('sidebar-title').textContent = room.name;
+        if (arrowEl) arrowEl.classList.remove('hidden');
         document.getElementById('home-sidebar').classList.add('hidden');
         document.getElementById('server-sidebar').classList.remove('hidden');
         document.getElementById('btn-create-channel').classList.remove('hidden');
@@ -791,13 +932,21 @@ function renderServerRail() {
             e.preventDefault();
             const isOwner = room.owner_id === state.user?.user_id;
             const action = isOwner ? 'Delete Server' : 'Leave Server';
-            if (confirm(`${action} "${room.name}"?`)) {
-                if (isOwner) {
-                    window.pywebview.api.delete_room(room.room_id);
-                } else {
-                    window.pywebview.api.leave_room(room.room_id);
+            showConfirmModal({
+                title: action,
+                message: isOwner
+                    ? `Are you sure you want to delete server "${room.name}"? This action cannot be undone.`
+                    : `Are you sure you want to leave server "${room.name}"?`,
+                confirmText: action,
+                isDanger: true,
+                onConfirm: () => {
+                    if (isOwner) {
+                        window.pywebview.api.delete_room(room.room_id);
+                    } else {
+                        window.pywebview.api.leave_room(room.room_id);
+                    }
                 }
-            }
+            });
         };
 
         railList.appendChild(btn);
@@ -846,6 +995,8 @@ function renderServerChannels(room) {
     textList.innerHTML = '';
     voiceList.innerHTML = '';
 
+    const isOwner = (room.owner_id === state.user?.user_id);
+
     (room.channels || []).forEach(ch => {
         const isVoice = (ch.channel_type === 'voice' || ch.type === 'voice');
 
@@ -855,8 +1006,10 @@ function renderServerChannels(room) {
         item.style.position = 'relative';
 
         const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
+        row.className = 'channel-item';
+
+        const leftWrap = document.createElement('div');
+        leftWrap.className = 'channel-left';
 
         const btn = document.createElement('button');
         btn.className = 'sidebar-item';
@@ -868,11 +1021,12 @@ function renderServerChannels(room) {
                 btn.classList.add('active');
             }
             btn.onclick = () => selectVoiceChannel(room.room_id, ch.channel_id, ch.name);
-            row.appendChild(btn);
+            leftWrap.appendChild(btn);
+            row.appendChild(leftWrap);
 
-            // Channel options for owner
-            if (room.owner_id === state.user?.user_id && room.channels.length > 1) {
-                appendChannelDeleteBtn(row, room.room_id, ch.channel_id, ch.name);
+            // Channel actions for owner
+            if (isOwner) {
+                appendChannelActionBtns(row, room.room_id, ch.channel_id, ch.name, (room.channels || []).length > 1);
             }
             item.appendChild(row);
 
@@ -890,10 +1044,11 @@ function renderServerChannels(room) {
                 btn.classList.add('active');
             }
             btn.onclick = () => selectTextChannel(room.room_id, ch.channel_id, ch.name);
-            row.appendChild(btn);
+            leftWrap.appendChild(btn);
+            row.appendChild(leftWrap);
 
-            if (room.owner_id === state.user?.user_id && room.channels.length > 1) {
-                appendChannelDeleteBtn(row, room.room_id, ch.channel_id, ch.name);
+            if (isOwner) {
+                appendChannelActionBtns(row, room.room_id, ch.channel_id, ch.name, (room.channels || []).length > 1);
             }
             item.appendChild(row);
             textList.appendChild(item);
@@ -909,22 +1064,55 @@ function renderServerChannels(room) {
     }
 }
 
-function appendChannelDeleteBtn(container, roomId, channelId, name) {
-    const delBtn = document.createElement('button');
-    delBtn.style.background = 'transparent';
-    delBtn.style.border = 'none';
-    delBtn.style.color = 'var(--text-muted)';
-    delBtn.style.cursor = 'pointer';
-    delBtn.style.padding = '4px 8px';
-    delBtn.title = 'Delete Channel';
-    delBtn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;">close</span>`;
-    delBtn.onclick = (e) => {
+function appendChannelActionBtns(container, roomId, channelId, name, canDelete = true) {
+    const actions = document.createElement('div');
+    actions.className = 'channel-actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'channel-action-btn';
+    renameBtn.title = 'Rename Channel';
+    renameBtn.innerHTML = `<span class="material-symbols-outlined">edit</span>`;
+    renameBtn.onclick = (e) => {
         e.stopPropagation();
-        if (confirm(`Delete channel "${name}"?`)) {
-            window.pywebview.api.delete_channel(roomId, channelId);
-        }
+        openRenameChannelModal(roomId, channelId, name);
     };
-    container.appendChild(delBtn);
+    actions.appendChild(renameBtn);
+
+    if (canDelete) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'channel-action-btn btn-delete';
+        delBtn.title = 'Delete Channel';
+        delBtn.innerHTML = `<span class="material-symbols-outlined">delete</span>`;
+        delBtn.onclick = (e) => {
+            e.stopPropagation();
+            showConfirmModal({
+                title: 'Delete Channel',
+                message: `Are you sure you want to delete #${name}? This action cannot be undone.`,
+                confirmText: 'Delete Channel',
+                isDanger: true,
+                onConfirm: () => {
+                    window.pywebview.api.delete_channel(roomId, channelId);
+                }
+            });
+        };
+        actions.appendChild(delBtn);
+    }
+    container.appendChild(actions);
+}
+
+function openRenameChannelModal(roomId, channelId, currentName) {
+    showPromptModal({
+        title: 'Rename Channel',
+        desc: 'Enter new channel name:',
+        placeholder: 'channel-name',
+        initialValue: currentName,
+        confirmText: 'Save',
+        onConfirm: (newName) => {
+            if (newName && newName.trim()) {
+                window.pywebview.api.rename_channel(roomId, channelId, newName.trim());
+            }
+        }
+    });
 }
 
 function renderChannelVoiceUsers(container, channelId) {
@@ -934,6 +1122,9 @@ function renderChannelVoiceUsers(container, channelId) {
         const row = document.createElement('div');
         row.className = `channel-voice-user ${u.is_speaking ? 'speaking' : ''}`;
         row.id = `v-user-${channelId}-${u.user_id}`;
+        row.style.cursor = 'pointer';
+        row.title = 'View Profile';
+        row.onclick = () => showUserProfileModal(u.user_id);
 
         const avStyle = u.avatar_image ? `background-image: url(data:image/png;base64,${u.avatar_image});` : `background-color: ${u.avatar_color || '#5865F2'};`;
         const avLetter = u.avatar_image ? '' : (u.display_name || u.username).charAt(0).toUpperCase();
@@ -1101,6 +1292,163 @@ function showPromptModal({ title, desc, placeholder = '', initialValue = '', con
 function closePromptModal() {
     document.getElementById('modal-prompt').classList.add('hidden');
     currentPromptCallback = null;
+}
+
+// ---------------- Custom Confirmation Dialog (Replaces native browser confirm()) ----------------
+
+function showConfirmModal({ title = 'Are you sure?', message = 'Do you really want to proceed?', confirmText = 'Confirm', isDanger = true, onConfirm }) {
+    const modal = document.getElementById('modal-confirm');
+    if (!modal) return;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+
+    const okBtn = document.getElementById('btn-confirm-ok');
+    const cancelBtn = document.getElementById('btn-confirm-cancel');
+
+    okBtn.textContent = confirmText;
+    okBtn.className = isDanger ? 'btn-danger' : 'btn-primary';
+
+    const cleanup = () => {
+        modal.classList.add('hidden');
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+    };
+
+    okBtn.onclick = () => {
+        cleanup();
+        if (onConfirm) onConfirm();
+    };
+
+    cancelBtn.onclick = () => {
+        cleanup();
+    };
+
+    modal.classList.remove('hidden');
+}
+
+// ---------------- User Profile Card Modal ----------------
+
+function showUserProfileModal(userId) {
+    const modal = document.getElementById('modal-user-profile');
+    if (!modal) return;
+
+    let targetUser = null;
+    if (state.user && state.user.user_id === userId) {
+        targetUser = state.user;
+    } else if (state.users && state.users[userId]) {
+        targetUser = state.users[userId];
+    } else if (state.friends) {
+        const f = state.friends.find(x => (x.user_id === userId || x.peer_id === userId));
+        if (f) {
+            targetUser = {
+                user_id: userId,
+                username: f.username || f.peer_name || '',
+                display_name: f.display_name || f.peer_display_name || f.username,
+                avatar_color: f.avatar_color || '#5865F2',
+                avatar_image: f.avatar_image || '',
+                banner_color: f.banner_color || '#5865F2',
+                banner_image: f.banner_image || '',
+                bio: f.bio || '',
+                status_text: f.status_text || (f.online ? 'Online' : 'Offline'),
+                online: !!(f.online || f.is_online)
+            };
+        }
+    }
+
+    if (!targetUser) {
+        targetUser = {
+            user_id: userId,
+            username: userId,
+            display_name: userId,
+            avatar_color: '#5865F2',
+            avatar_image: '',
+            banner_color: '#5865F2',
+            banner_image: '',
+            bio: 'No profile details available.',
+            status_text: 'Offline',
+            online: false
+        };
+    }
+
+    const dispName = targetUser.display_name || targetUser.username || 'User';
+    const username = targetUser.username || 'user';
+    const isOnline = Boolean(targetUser.online || targetUser.is_online);
+
+    // Banner
+    const bannerEl = document.getElementById('user-profile-banner');
+    if (targetUser.banner_image) {
+        bannerEl.style.backgroundImage = `url(data:image/png;base64,${targetUser.banner_image})`;
+        bannerEl.style.backgroundColor = '';
+    } else {
+        bannerEl.style.backgroundImage = '';
+        bannerEl.style.backgroundColor = targetUser.banner_color || '#5865F2';
+    }
+
+    // Avatar
+    const avatarEl = document.getElementById('user-profile-avatar');
+    if (targetUser.avatar_image) {
+        avatarEl.style.backgroundImage = `url(data:image/png;base64,${targetUser.avatar_image})`;
+        avatarEl.style.backgroundColor = '';
+        avatarEl.textContent = '';
+    } else {
+        avatarEl.style.backgroundImage = '';
+        avatarEl.style.backgroundColor = targetUser.avatar_color || '#5865F2';
+        avatarEl.textContent = dispName.charAt(0).toUpperCase();
+        avatarEl.style.display = 'flex';
+        avatarEl.style.alignItems = 'center';
+        avatarEl.style.justifyContent = 'center';
+        avatarEl.style.color = '#fff';
+        avatarEl.style.fontSize = '32px';
+        avatarEl.style.fontWeight = 'bold';
+    }
+
+    // Status dot
+    const dotEl = document.getElementById('user-profile-status-dot');
+    dotEl.className = `status-dot profile-modal-status-dot ${isOnline ? 'status-online' : 'status-offline'}`;
+
+    // Names
+    document.getElementById('user-profile-display-name').textContent = dispName;
+    document.getElementById('user-profile-username').textContent = `@${username}`;
+
+    // Status badge
+    const badgeEl = document.getElementById('user-profile-status-badge');
+    badgeEl.textContent = targetUser.status_text || (isOnline ? 'Online' : 'Offline');
+
+    // Bio
+    const bioEl = document.getElementById('user-profile-bio');
+    bioEl.textContent = targetUser.bio || 'No bio set.';
+
+    // Actions
+    const isSelf = (state.user && state.user.user_id === userId);
+    const actionsEl = document.getElementById('user-profile-actions');
+    if (isSelf) {
+        actionsEl.style.display = 'none';
+    } else {
+        actionsEl.style.display = 'flex';
+        const msgBtn = document.getElementById('btn-profile-send-msg');
+        const callBtn = document.getElementById('btn-profile-call');
+
+        msgBtn.onclick = () => {
+            closeUserProfileModal();
+            selectDmUser(userId, dispName);
+        };
+        callBtn.onclick = () => {
+            closeUserProfileModal();
+            startDirectCall(userId, dispName);
+        };
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeUserProfileModal() {
+    const modal = document.getElementById('modal-user-profile');
+    if (modal) modal.classList.add('hidden');
+}
+
+function startDirectCall(userId, userName) {
+    selectDmUser(userId, userName);
+    window.pywebview.api.start_call(userId);
 }
 
 function promptCreateRoom() {
@@ -1283,9 +1631,12 @@ function renderMemberList(members) {
                 <div class="member-role" style="font-size: 11px; color: var(--text-muted);">${m.is_owner ? 'Owner' : 'Member'}</div>
             </div>
         `;
-        if (m.user_id !== state.user?.user_id) {
-            item.onclick = () => selectDmUser(m.user_id, m.display_name || m.username);
+        if (!state.users[m.user_id]) {
+            state.users[m.user_id] = m;
+        } else {
+            Object.assign(state.users[m.user_id], m);
         }
+        item.onclick = () => showUserProfileModal(m.user_id);
         list.appendChild(item);
     });
 }
@@ -1458,12 +1809,12 @@ function appendChatMessage(msg, autoScroll = true) {
     }
 
     row.innerHTML = `
-        <div class="avatar-wrap">
+        <div class="avatar-wrap" onclick="showUserProfileModal('${msg.sender_id}')" style="cursor: pointer;" title="View Profile">
             <div class="avatar" style="${avStyle}">${avLetter}</div>
         </div>
         <div class="msg-content-wrap">
             <div class="msg-header">
-                <span class="msg-sender">${escapeHtml(senderName)}</span>
+                <span class="msg-sender" onclick="showUserProfileModal('${msg.sender_id}')" style="cursor: pointer;" title="View Profile">${escapeHtml(senderName)}</span>
                 <span class="msg-time">${timeStr}</span>
                 ${deleteHtml}
             </div>
@@ -1619,6 +1970,9 @@ function renderVoiceStage(chName) {
         const card = document.createElement('div');
         card.className = `voice-card ${u.is_speaking ? 'speaking' : ''}`;
         card.id = `stage-card-${u.user_id}`;
+        card.style.cursor = 'pointer';
+        card.title = 'View Profile';
+        card.onclick = () => showUserProfileModal(u.user_id);
 
         const avStyle = u.avatar_image ? `background-image: url(data:image/png;base64,${u.avatar_image});` : `background-color: ${u.avatar_color || '#5865F2'};`;
         const avLetter = u.avatar_image ? '' : (u.display_name || u.username).charAt(0).toUpperCase();
@@ -1641,14 +1995,31 @@ function onPeerSpeaking(data) {
 }
 
 function updateUserSpeakingState(userId, isSpeaking) {
-    // 1. Stage Card
-    const card = document.getElementById(`stage-card-${userId}`);
-    if (card) card.classList.toggle('speaking', isSpeaking);
+    const speaking = Boolean(isSpeaking);
 
-    // 2. Channel user tree
+    // 1. User bottom panel avatar if local user (Green ring like Discord)
+    if (state.user && userId === state.user.user_id) {
+        const userPanelAvatar = document.getElementById('user-panel-avatar');
+        if (userPanelAvatar) userPanelAvatar.classList.toggle('speaking', speaking);
+    }
+
+    // 2. Stage Card
+    const card = document.getElementById(`stage-card-${userId}`);
+    if (card) card.classList.toggle('speaking', speaking);
+
+    // 3. Channel user tree
     if (state.currentVoiceChannelId) {
         const treeUser = document.getElementById(`v-user-${state.currentVoiceChannelId}-${userId}`);
-        if (treeUser) treeUser.classList.toggle('speaking', isSpeaking);
+        if (treeUser) treeUser.classList.toggle('speaking', speaking);
+    }
+
+    // 4. DM Call cards
+    if (state.user && userId === state.user.user_id) {
+        const myCallAvatar = document.getElementById('call-my-avatar');
+        if (myCallAvatar) myCallAvatar.classList.toggle('speaking', speaking);
+    } else {
+        const peerCallAvatar = document.getElementById('call-peer-avatar');
+        if (peerCallAvatar) peerCallAvatar.classList.toggle('speaking', speaking);
     }
 }
 
@@ -2078,7 +2449,7 @@ function renderFriendsTab(tab) {
         }
 
         row.innerHTML = `
-            <div class="friend-info">
+            <div class="friend-info" onclick="showUserProfileModal('${friendId}')" style="cursor: pointer;" title="View Profile">
                 <div class="avatar-wrap">
                     <div class="avatar" style="${avStyle}">${avLetter}</div>
                     <div class="status-dot ${isOnline ? 'status-online' : 'status-offline'}"></div>
