@@ -81,6 +81,13 @@ class TCPClient:
 
     def connect_to_server(self, host: str, port: int) -> bool:
         """Connects to VimCord TCP control server."""
+        if not isinstance(host, str) or not host.strip():
+            from vimcord.common.protocol import DEFAULT_HOST
+            host = DEFAULT_HOST
+        if not isinstance(port, int) or port <= 0:
+            from vimcord.common.protocol import DEFAULT_TCP_PORT
+            port = DEFAULT_TCP_PORT
+
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.settimeout(5.0)

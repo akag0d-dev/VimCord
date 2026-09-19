@@ -98,15 +98,13 @@ def load_config(config_file: Optional[Path] = None, config_path: Optional[Path] 
         except Exception:
             pass
 
-    # Ensure remote server host/port are used by default instead of obsolete local loopback
-    if cfg.get("host") in ("127.0.0.1", "localhost", "", None):
+    # Ensure host, tcp_port, and udp_port have valid types
+    if not isinstance(cfg.get("host"), str) or cfg.get("host") in ("127.0.0.1", "localhost", "", None):
         cfg["host"] = DEFAULT_HOST
+    if not isinstance(cfg.get("tcp_port"), int) or cfg.get("tcp_port") <= 0:
         cfg["tcp_port"] = DEFAULT_TCP_PORT
+    if not isinstance(cfg.get("udp_port"), int) or cfg.get("udp_port") <= 0:
         cfg["udp_port"] = DEFAULT_UDP_PORT
-        try:
-            save_config(cfg, config_file=config_file, config_path=config_path)
-        except Exception:
-            pass
 
     return cfg
 

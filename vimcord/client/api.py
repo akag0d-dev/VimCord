@@ -248,9 +248,20 @@ class VimCordAPI:
     # ---------------- Auth & Connection ----------------
 
     def login(self, username: str, password: str = "", host: str = "", tcp_port: int = 0, udp_port: int = 0, auto_login: bool = False):
-        self._server_host = host or self._server_host or DEFAULT_HOST
-        self._server_tcp_port = tcp_port or self._server_tcp_port or DEFAULT_TCP_PORT
-        self._server_udp_port = udp_port or self._server_udp_port or DEFAULT_UDP_PORT
+        if isinstance(host, str) and host.strip():
+            self._server_host = host.strip()
+        elif not isinstance(self._server_host, str) or not self._server_host:
+            self._server_host = DEFAULT_HOST
+
+        if isinstance(tcp_port, int) and tcp_port > 0:
+            self._server_tcp_port = tcp_port
+        elif not isinstance(self._server_tcp_port, int) or self._server_tcp_port <= 0:
+            self._server_tcp_port = DEFAULT_TCP_PORT
+
+        if isinstance(udp_port, int) and udp_port > 0:
+            self._server_udp_port = udp_port
+        elif not isinstance(self._server_udp_port, int) or self._server_udp_port <= 0:
+            self._server_udp_port = DEFAULT_UDP_PORT
 
         # Update saved connection config
         cfg_updates = {
@@ -282,9 +293,20 @@ class VimCordAPI:
             return {"success": False, "message": err_msg}
 
     def register(self, username: str, password: str = "", host: str = "", tcp_port: int = 0, udp_port: int = 0):
-        self._server_host = host or self._server_host or DEFAULT_HOST
-        self._server_tcp_port = tcp_port or self._server_tcp_port or DEFAULT_TCP_PORT
-        self._server_udp_port = udp_port or self._server_udp_port or DEFAULT_UDP_PORT
+        if isinstance(host, str) and host.strip():
+            self._server_host = host.strip()
+        elif not isinstance(self._server_host, str) or not self._server_host:
+            self._server_host = DEFAULT_HOST
+
+        if isinstance(tcp_port, int) and tcp_port > 0:
+            self._server_tcp_port = tcp_port
+        elif not isinstance(self._server_tcp_port, int) or self._server_tcp_port <= 0:
+            self._server_tcp_port = DEFAULT_TCP_PORT
+
+        if isinstance(udp_port, int) and udp_port > 0:
+            self._server_udp_port = udp_port
+        elif not isinstance(self._server_udp_port, int) or self._server_udp_port <= 0:
+            self._server_udp_port = DEFAULT_UDP_PORT
 
         if not self._tcp_client.sock or not self._tcp_client._is_running:
             self._tcp_client.disconnect()
