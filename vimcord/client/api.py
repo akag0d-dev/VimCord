@@ -127,6 +127,7 @@ class VimCordAPI:
         s.channel_deleted.connect(lambda rid, cid: self.dispatch_event("channel_deleted", {"room_id": rid, "channel_id": cid}))
         s.channel_renamed.connect(lambda rid, cid, name: self.dispatch_event("channel_renamed", {"room_id": rid, "channel_id": cid, "name": name}))
         s.voice_state_update.connect(lambda v: self.dispatch_event("voice_state_update", v))
+        s.voice_channel_sync.connect(lambda v: self.dispatch_event("voice_channel_sync", v))
         s.chat_message.connect(self._on_incoming_chat_message)
         s.message_deleted.connect(lambda mid, tt, tid: self.dispatch_event("message_deleted", {"msg_id": mid, "target_type": tt, "target_id": tid}))
         s.history_response.connect(lambda tt, tid, msgs: self.dispatch_event("history_response", {"target_type": tt, "target_id": tid, "messages": msgs}))

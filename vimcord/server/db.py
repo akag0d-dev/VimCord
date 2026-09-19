@@ -522,6 +522,23 @@ class Database:
             conn.commit()
             return cur.rowcount > 0
 
+    def is_friend(self, user_a: str, user_b: str) -> bool:
+        """Returns True if user_a and user_b have an accepted friendship."""
+        if not user_a or not user_b or user_a == user_b:
+            return False
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM friendships
+                WHERE ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))
+                  AND status = 'accepted'
+                """,
+                (user_a, user_b, user_b, user_a)
+            )
+            row = cur.fetchone()
+            return bool(row and row[0] > 0)
+
     def get_friends(self, user_id: str) -> List[Dict[str, Any]]:
         """Returns list of accepted friends and incoming/outgoing pending requests."""
         with self._get_conn() as conn:

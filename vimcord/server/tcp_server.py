@@ -332,10 +332,30 @@ class TCPServer:
                     members = self.db.get_room_members(room_id)
                     for m in members:
                         m["online"] = m["user_id"] in self.server_state.users
+
+                    live_room = self.server_state.rooms.get(room_id)
+                    voice_map = {}
+                    if live_room:
+                        for cid, ch in live_room.channels.items():
+                            if ch.channel_type == "voice":
+                                voice_map[cid] = []
+                                for uid in ch.voice_users:
+                                    u_obj = self.server_state.users.get(uid)
+                                    if u_obj:
+                                        voice_map[cid].append({
+                                            "user_id": u_obj.user_id,
+                                            "username": u_obj.username,
+                                            "display_name": u_obj.display_name or u_obj.username,
+                                            "avatar_color": u_obj.avatar_color,
+                                            "avatar_image": u_obj.avatar_image,
+                                            "is_muted": u_obj.is_muted,
+                                            "is_deafened": u_obj.is_deafened
+                                        })
                     writer.write(encode_json_message({
                         "type": "room_members_resp",
                         "room_id": room_id,
-                        "members": members
+                        "members": members,
+                        "voice_channels": voice_map
                     }))
                     await writer.drain()
 
@@ -577,6 +597,44 @@ class TCPServer:
                             "is_deafened": current_user.is_deafened
                         })
 
+                        # Send snapshot of current participants in this voice channel to the joining user
+                        room = self.server_state.rooms.get(room_id)
+                        ch = room.channels.get(channel_id) if room else None
+                        participants = []
+                        if ch:
+                            for uid in ch.voice_users:
+                                u_obj = self.server_state.users.get(uid)
+                                if u_obj:
+                                    participants.append({
+                                        "user_id": u_obj.user_id,
+                                        "username": u_obj.username,
+                                        "display_name": u_obj.display_name or u_obj.username,
+                                        "avatar_color": u_obj.avatar_color,
+                                        "avatar_image": u_obj.avatar_image,
+                                        "is_muted": u_obj.is_muted,
+                                        "is_deafened": u_obj.is_deafened,
+                                        "is_speaking": False
+                                    })
+                                else:
+                                    db_u = self.db.get_user_by_id(uid)
+                                    if db_u:
+                                        participants.append({
+                                            "user_id": db_u["user_id"],
+                                            "username": db_u["username"],
+                                            "display_name": db_u.get("display_name") or db_u["username"],
+                                            "avatar_color": db_u.get("avatar_color", "#5865F2"),
+                                            "avatar_image": db_u.get("avatar_image", ""),
+                                            "is_muted": False,
+                                            "is_deafened": False,
+                                            "is_speaking": False
+                                        })
+                        await self.send_to_user(current_user.user_id, {
+                            "type": "voice_channel_sync",
+                            "room_id": room_id,
+                            "channel_id": channel_id,
+                            "users": participants
+                        })
+
                 elif msg_type == "leave_voice":
                     prev_list = self.server_state.leave_voice(current_user.user_id)
                     for room_id, channel_id in prev_list:
@@ -591,6 +649,14 @@ class TCPServer:
                 # 13. DIRECT CALLS (1-on-1)
                 elif msg_type == "call_start":
                     target_user_id = msg.get("target_user_id")
+                    if not self.db.is_friend(current_user.user_id, target_user_id):
+                        await self.send_to_user(current_user.user_id, {
+                            "type": "call_failed",
+                            "target_user_id": target_user_id,
+                            "reason": "Звонки доступны только друзьям"
+                        })
+                        continue
+
                     session = self.server_state.create_call(current_user.user_id, target_user_id)
                     if session:
                         await self.send_to_user(target_user_id, {

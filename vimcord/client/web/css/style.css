@@ -1117,10 +1117,33 @@ body {
     color: #fff;
     background-size: cover;
 }
+.voice-card-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    max-width: 95%;
+}
 .voice-card-name {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-bright);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.voice-card-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.voice-card-badges .card-status-badge {
+    font-size: 16px;
+}
+.card-status-badge.muted,
+.card-status-badge.deafened {
+    color: var(--red);
 }
 #voice-stage-controls {
     height: 64px;
@@ -1984,11 +2007,17 @@ select option, .settings-select option {
 }
 .channel-voice-user .vu-icons {
     display: flex;
+    align-items: center;
     gap: 4px;
-    color: var(--text-muted);
+    margin-left: auto;
+    flex-shrink: 0;
 }
 .channel-voice-user .vu-icons .material-symbols-outlined {
-    font-size: 14px;
+    font-size: 16px;
+}
+.channel-voice-user .vu-icons .icon-status-muted,
+.channel-voice-user .vu-icons .icon-status-deafened {
+    color: var(--red);
 }
 
 /* Incoming Call Modal */

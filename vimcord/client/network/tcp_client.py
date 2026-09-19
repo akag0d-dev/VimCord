@@ -34,6 +34,7 @@ class TCPClientSignals:
         self.channel_deleted = Signal(str, str)        # room_id, channel_id
         self.channel_renamed = Signal(str, str, str)   # room_id, channel_id, new_name
         self.voice_state_update = Signal(dict)         # dict with user_id, room_id, channel_id, action
+        self.voice_channel_sync = Signal(dict)         # dict with room_id, channel_id, users
 
         # Chat & history
         self.chat_message = Signal(dict)               # message dict
@@ -339,6 +340,9 @@ class TCPClient:
 
         elif mtype == "voice_state_update":
             self.signals.voice_state_update.emit(msg)
+
+        elif mtype == "voice_channel_sync":
+            self.signals.voice_channel_sync.emit(msg)
 
         elif mtype == "new_msg":
             self.signals.chat_message.emit(msg)

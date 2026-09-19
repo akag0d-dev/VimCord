@@ -116,7 +116,9 @@ class TestVoiceNoGhostingIntegration(unittest.IsolatedAsyncioTestCase):
         w_a.write(encode_json_message({"type": "join_voice", "room_id": room_id, "channel_id": vch_1}))
         await w_a.drain()
         msg1 = await self._read_json(r_a)
+        msg1_sync = await self._read_json(r_a)
         self.assertEqual(msg1["type"], "voice_state_update")
+        self.assertEqual(msg1_sync["type"], "voice_channel_sync")
         self.assertEqual(msg1["channel_id"], vch_1)
         self.assertEqual(msg1["action"], "join")
 
@@ -130,7 +132,9 @@ class TestVoiceNoGhostingIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ev_leave["action"], "leave")
 
         ev_join = await self._read_json(r_a)
+        ev_sync2 = await self._read_json(r_a)
         self.assertEqual(ev_join["type"], "voice_state_update")
+        self.assertEqual(ev_sync2["type"], "voice_channel_sync")
         self.assertEqual(ev_join["channel_id"], vch_2)
         self.assertEqual(ev_join["action"], "join")
 

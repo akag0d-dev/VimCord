@@ -102,8 +102,10 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         }))
         await w_a.drain()
         v_upd_a = await self._read_json(r_a)
+        v_sync_a = await self._read_json(r_a)
         v_upd_b = await self._read_json(r_b)
         self.assertEqual(v_upd_a["type"], "voice_state_update")
+        self.assertEqual(v_sync_a["type"], "voice_channel_sync")
         self.assertEqual(v_upd_b["type"], "voice_state_update")
         self.assertEqual(v_upd_a["action"], "join")
 
@@ -132,7 +134,10 @@ class TestServerIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(hist_b["messages"]), 1)
         self.assertEqual(hist_b["messages"][0]["content"], "Привет, Боб!")
 
-        # 7. Direct 1-on-1 Call
+        # 7. Direct 1-on-1 Call (Accepted Friends)
+        self.db.send_friend_request(alice_id, "Bob")
+        self.db.accept_friend_request(bob_id, alice_id)
+
         # Alice calls Bob
         w_a.write(encode_json_message({"type": "call_start", "target_user_id": bob_id}))
         await w_a.drain()

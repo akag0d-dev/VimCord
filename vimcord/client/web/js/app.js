@@ -654,6 +654,12 @@ window.onVimCordEvent = function(eventName, payload) {
         case 'voice_state_update':
             onVoiceStateUpdate(payload);
             break;
+        case 'voice_channel_sync':
+            onVoiceChannelSync(payload);
+            break;
+        case 'user_media_state':
+            onUserMediaState(payload);
+            break;
         case 'peer_speaking':
             onPeerSpeaking(payload);
             break;
@@ -1226,8 +1232,8 @@ function renderChannelVoiceUsers(container, channelId) {
         const avLetter = u.avatar_image ? '' : (u.display_name || u.username).charAt(0).toUpperCase();
 
         let icons = '';
-        if (u.is_muted) icons += `<span class="material-symbols-outlined" style="color:var(--red);">mic_off</span>`;
-        if (u.is_deafened) icons += `<span class="material-symbols-outlined" style="color:var(--red);">headset_off</span>`;
+        if (u.is_muted) icons += `<span class="material-symbols-outlined icon-status-muted" title="Muted">mic_off</span>`;
+        if (u.is_deafened) icons += `<span class="material-symbols-outlined icon-status-deafened" title="Deafened">headset_off</span>`;
 
         row.innerHTML = `
             <div class="vu-avatar" style="${avStyle}">${avLetter}</div>
@@ -1291,7 +1297,19 @@ function selectDmUser(peerId, peerName) {
     document.getElementById('channel-header-title').textContent = `@${peerName}`;
     document.getElementById('channel-header-desc').textContent = `Direct message with ${peerName}`;
     document.getElementById('chat-text-input').placeholder = `Message @${peerName}`;
-    document.getElementById('btn-header-call').classList.remove('hidden');
+    
+    // Only show call button if peer is accepted friend
+    const friendRecord = (state.friends || []).find(f => (f.peer_id === peerId || f.user_id === peerId));
+    const isFriend = Boolean(friendRecord && (friendRecord.friendship_status === 'accepted' || friendRecord.status === 'accepted'));
+    const callHeaderBtn = document.getElementById('btn-header-call');
+    if (callHeaderBtn) {
+        if (isFriend) {
+            callHeaderBtn.classList.remove('hidden');
+        } else {
+            callHeaderBtn.classList.add('hidden');
+        }
+    }
+
     document.getElementById('btn-toggle-members').classList.add('hidden');
 
     document.getElementById('chat-messages-list').innerHTML = '';
@@ -1301,6 +1319,28 @@ function selectDmUser(peerId, peerName) {
 function selectVoiceChannel(roomId, channelId, channelName) {
     state.currentVoiceChannelId = channelId;
     state.currentVoiceRoomId = roomId;
+
+    // Highlight active voice channel in sidebar
+    document.querySelectorAll('.channel-item .sidebar-item').forEach(b => b.classList.remove('active'));
+    const channelVoiceCont = document.getElementById(`voice-users-${channelId}`);
+    if (channelVoiceCont && channelVoiceCont.previousElementSibling) {
+        const btn = channelVoiceCont.previousElementSibling.querySelector('.sidebar-item');
+        if (btn) btn.classList.add('active');
+    }
+
+    state.voiceUsers[channelId] = state.voiceUsers[channelId] || [];
+    if (state.user && !state.voiceUsers[channelId].some(x => x.user_id === state.user.user_id)) {
+        state.voiceUsers[channelId].push({
+            user_id: state.user.user_id,
+            username: state.user.username,
+            display_name: state.user.display_name || state.user.username,
+            avatar_color: state.user.avatar_color || '#5865F2',
+            avatar_image: state.user.avatar_image || '',
+            is_muted: Boolean(state.isMuted),
+            is_deafened: Boolean(state.isDeafened),
+            is_speaking: false
+        });
+    }
 
     document.getElementById('voice-status-bar').classList.remove('hidden');
     document.getElementById('voice-status-channel').textContent = `${channelName} / Connected`;
@@ -1315,8 +1355,38 @@ function selectVoiceChannel(roomId, channelId, channelName) {
     document.getElementById('btn-header-call').classList.add('hidden');
     document.getElementById('btn-toggle-members').classList.add('hidden');
 
+    const cont = document.getElementById(`voice-users-${channelId}`);
+    if (cont) renderChannelVoiceUsers(cont, channelId);
+
     renderVoiceStage(channelName);
     window.pywebview.api.join_voice(roomId, channelId);
+}
+
+function onVoiceChannelSync(payload) {
+    const { room_id, channel_id, users } = payload;
+    if (!channel_id || !Array.isArray(users)) return;
+
+    state.voiceUsers[channel_id] = users.map(u => {
+        const cached = state.users[u.user_id] || {};
+        return {
+            user_id: u.user_id,
+            username: u.username || cached.username || u.user_id,
+            display_name: u.display_name || cached.display_name || u.username || u.user_id,
+            avatar_color: u.avatar_color || cached.avatar_color || '#5865F2',
+            avatar_image: u.avatar_image || cached.avatar_image || '',
+            is_muted: Boolean(u.is_muted),
+            is_deafened: Boolean(u.is_deafened),
+            is_speaking: false
+        };
+    });
+
+    const cont = document.getElementById(`voice-users-${channel_id}`);
+    if (cont) {
+        renderChannelVoiceUsers(cont, channel_id);
+    }
+    if (state.currentVoiceChannelId === channel_id) {
+        renderVoiceStage(channel_id);
+    }
 }
 
 function onVoiceStateUpdate(payload) {
@@ -1342,15 +1412,18 @@ function onVoiceStateUpdate(payload) {
 
         const u = state.users[user_id] || { user_id, username: user_id, display_name: user_id };
         const existing = state.voiceUsers[channel_id].find(x => x.user_id === user_id);
-        if (!existing) {
+        if (existing) {
+            existing.is_muted = Boolean(is_muted);
+            existing.is_deafened = Boolean(is_deafened);
+        } else {
             state.voiceUsers[channel_id].push({
                 user_id,
                 username: u.username || user_id,
                 display_name: u.display_name || u.username || user_id,
                 avatar_color: u.avatar_color || '#5865F2',
                 avatar_image: u.avatar_image || '',
-                is_muted: !!is_muted,
-                is_deafened: !!is_deafened,
+                is_muted: Boolean(is_muted),
+                is_deafened: Boolean(is_deafened),
                 is_speaking: false
             });
         }
@@ -1537,15 +1610,34 @@ function showUserProfileModal(userId) {
         actionsEl.style.display = 'flex';
         const msgBtn = document.getElementById('btn-profile-send-msg');
         const callBtn = document.getElementById('btn-profile-call');
+        const addFriendBtn = document.getElementById('btn-profile-add-friend');
+
+        const friendRecord = (state.friends || []).find(f => (f.peer_id === userId || f.user_id === userId));
+        const isFriend = Boolean(friendRecord && (friendRecord.friendship_status === 'accepted' || friendRecord.status === 'accepted'));
 
         msgBtn.onclick = () => {
             closeUserProfileModal();
             selectDmUser(userId, dispName);
         };
-        callBtn.onclick = () => {
-            closeUserProfileModal();
-            startDirectCall(userId, dispName);
-        };
+
+        if (isFriend) {
+            callBtn.classList.remove('hidden');
+            if (addFriendBtn) addFriendBtn.classList.add('hidden');
+            callBtn.onclick = () => {
+                closeUserProfileModal();
+                startDirectCall(userId, dispName);
+            };
+        } else {
+            callBtn.classList.add('hidden');
+            if (addFriendBtn) {
+                addFriendBtn.classList.remove('hidden');
+                addFriendBtn.onclick = () => {
+                    closeUserProfileModal();
+                    window.pywebview.api.send_friend_request(targetUser.username);
+                    showToast(`Friend request sent to @${targetUser.username}`);
+                };
+            }
+        }
     }
 
     modal.classList.remove('hidden');
@@ -1557,6 +1649,12 @@ function closeUserProfileModal() {
 }
 
 function startDirectCall(userId, userName) {
+    const friendRecord = (state.friends || []).find(f => (f.peer_id === userId || f.user_id === userId));
+    const isFriend = Boolean(friendRecord && (friendRecord.friendship_status === 'accepted' || friendRecord.status === 'accepted'));
+    if (!isFriend) {
+        showToast('Calls are only available with friends / Звонки доступны только друзьям');
+        return;
+    }
     selectDmUser(userId, userName);
     window.pywebview.api.start_call(userId);
 }
@@ -1708,9 +1806,30 @@ function onLeaveRoomResp(payload) {
 }
 
 function onRoomMembersResp(payload) {
-    const { room_id, members } = payload;
+    const { room_id, members, voice_channels } = payload;
     if (state.currentRoomId === room_id) {
         renderMemberList(members);
+    }
+    if (voice_channels && typeof voice_channels === 'object') {
+        Object.entries(voice_channels).forEach(([cid, users]) => {
+            state.voiceUsers[cid] = (users || []).map(u => ({
+                user_id: u.user_id,
+                username: u.username || u.user_id,
+                display_name: u.display_name || u.username || u.user_id,
+                avatar_color: u.avatar_color || '#5865F2',
+                avatar_image: u.avatar_image || '',
+                is_muted: Boolean(u.is_muted),
+                is_deafened: Boolean(u.is_deafened),
+                is_speaking: false
+            }));
+            const cont = document.getElementById(`voice-users-${cid}`);
+            if (cont) {
+                renderChannelVoiceUsers(cont, cid);
+            }
+            if (state.currentVoiceChannelId === cid) {
+                renderVoiceStage(cid);
+            }
+        });
     }
 }
 
@@ -2072,6 +2191,8 @@ function renderVoiceStage(chName) {
             display_name: state.user.display_name || state.user.username,
             avatar_color: state.user.avatar_color || '#5865F2',
             avatar_image: state.user.avatar_image || '',
+            is_muted: Boolean(state.isMuted),
+            is_deafened: Boolean(state.isDeafened),
             is_speaking: false
         });
     }
@@ -2087,9 +2208,20 @@ function renderVoiceStage(chName) {
         const avStyle = u.avatar_image ? `background-image: url(data:image/png;base64,${u.avatar_image});` : `background-color: ${u.avatar_color || '#5865F2'};`;
         const avLetter = u.avatar_image ? '' : (u.display_name || u.username).charAt(0).toUpperCase();
 
+        let cardBadges = '';
+        if (u.is_muted) {
+            cardBadges += `<span class="material-symbols-outlined card-status-badge muted" title="Muted">mic_off</span>`;
+        }
+        if (u.is_deafened) {
+            cardBadges += `<span class="material-symbols-outlined card-status-badge deafened" title="Deafened">headset_off</span>`;
+        }
+
         card.innerHTML = `
             <div class="voice-card-avatar" style="${avStyle}">${avLetter}</div>
-            <div class="voice-card-name">${escapeHtml(u.display_name || u.username)}</div>
+            <div class="voice-card-name-row">
+                <span class="voice-card-name">${escapeHtml(u.display_name || u.username)}</span>
+                <span class="voice-card-badges">${cardBadges}</span>
+            </div>
         `;
         grid.appendChild(card);
     });
@@ -2212,12 +2344,54 @@ function onScreenStop(data) {
 
 // ---------------- Audio Controls (Mute / Deafen) ----------------
 
+function updateVoiceUserMediaState(userId, isMuted, isDeafened) {
+    if (state.users[userId]) {
+        state.users[userId].is_muted = isMuted;
+        state.users[userId].is_deafened = isDeafened;
+    }
+    Object.keys(state.voiceUsers).forEach(cid => {
+        const u = (state.voiceUsers[cid] || []).find(x => x.user_id === userId);
+        if (u) {
+            u.is_muted = isMuted;
+            u.is_deafened = isDeafened;
+            const cont = document.getElementById(`voice-users-${cid}`);
+            if (cont) renderChannelVoiceUsers(cont, cid);
+            if (state.currentVoiceChannelId === cid) renderVoiceStage(cid);
+        }
+    });
+}
+
+function onUserMediaState(payload) {
+    const { user_id, is_muted, is_deafened } = payload;
+    if (!user_id) return;
+    if (state.user && state.user.user_id === user_id) {
+        state.isMuted = Boolean(is_muted);
+        state.isDeafened = Boolean(is_deafened);
+        const micBtn = document.getElementById('btn-toggle-mic');
+        if (micBtn) {
+            micBtn.classList.toggle('active', state.isMuted);
+            document.getElementById('mic-icon-svg').textContent = state.isMuted ? 'mic_off' : 'mic';
+            micBtn.title = state.isMuted ? t('unmute_mic', 'Unmute') : t('mute_mic', 'Mute');
+        }
+        const deafenBtn = document.getElementById('btn-toggle-deafen');
+        if (deafenBtn) {
+            deafenBtn.classList.toggle('active', state.isDeafened);
+            document.getElementById('deafen-icon-svg').textContent = state.isDeafened ? 'headset_off' : 'headphones';
+            deafenBtn.title = state.isDeafened ? t('undeafen_audio', 'Undeafen') : t('deafen_audio', 'Deafen');
+        }
+    }
+    updateVoiceUserMediaState(user_id, Boolean(is_muted), Boolean(is_deafened));
+}
+
 function toggleMic() {
     state.isMuted = !state.isMuted;
     const btn = document.getElementById('btn-toggle-mic');
     btn.classList.toggle('active', state.isMuted);
     document.getElementById('mic-icon-svg').textContent = state.isMuted ? 'mic_off' : 'mic';
     btn.title = state.isMuted ? t('unmute_mic', 'Unmute') : t('mute_mic', 'Mute');
+    if (state.user) {
+        updateVoiceUserMediaState(state.user.user_id, state.isMuted, state.isDeafened);
+    }
     window.pywebview.api.set_mic_muted(state.isMuted);
 }
 
@@ -2227,6 +2401,9 @@ function toggleDeafen() {
     btn.classList.toggle('active', state.isDeafened);
     document.getElementById('deafen-icon-svg').textContent = state.isDeafened ? 'headset_off' : 'headphones';
     btn.title = state.isDeafened ? t('undeafen_audio', 'Undeafen') : t('deafen_audio', 'Deafen');
+    if (state.user) {
+        updateVoiceUserMediaState(state.user.user_id, state.isMuted, state.isDeafened);
+    }
     window.pywebview.api.set_deafened(state.isDeafened);
 }
 
