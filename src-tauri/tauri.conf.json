@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "akag0d.vimcord.desktop.client",
   "build": {
-    "frontendDist": "../vimcord/client/web"
+    "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,
