@@ -12,7 +12,7 @@
 <body class="theme-dark">
     <!-- Window Custom Frameless Titlebar -->
     <div id="titlebar">
-        <div class="titlebar-drag pywebview-drag-region">
+        <div class="titlebar-drag pywebview-drag-region" data-tauri-drag-region>
             <img src="icon.ico" class="app-titlebar-icon" alt="VimCord">
             <span class="app-title">VimCord</span>
             <span id="titlebar-sub"></span>
@@ -768,6 +768,7 @@
     <!-- Toast Notification Container -->
     <div id="toast-container"></div>
 
+    <script src="js/tauri_bridge.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

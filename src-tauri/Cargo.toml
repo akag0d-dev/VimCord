@@ -1,0 +1,33 @@
+[package]
+name = "vimcord"
+version = "0.1.0"
+description = "VimCord Desktop Client"
+authors = ["akag0d"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "vimcord_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3" }
+
+[dependencies]
+tauri = { version = "2.11.3", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = "0.3"
+log = "0.4"
+base64 = "0.22"
+uuid = { version = "1.10", features = ["v4"] }
+chrono = "0.4"
+dirs = "5.0"
+cpal = "0.15"
+hound = "3.5"
+rfd = "0.15"
+open = "5.3"
+bytes = "1.7"
