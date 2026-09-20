@@ -370,11 +370,17 @@ class TCPServer:
                 # 6. DELETE ROOM
                 elif msg_type == "delete_room":
                     room_id = msg.get("room_id")
-                    if room_id and self.server_state.delete_room(room_id):
-                        await self.send_to_room_members(room_id, {
-                            "type": "room_deleted",
-                            "room_id": room_id
-                        })
+                    if room_id:
+                        room = self.server_state.rooms.get(room_id)
+                        members = list(room.members) if room else []
+                        if self.server_state.delete_room(room_id):
+                            notif = {
+                                "type": "room_deleted",
+                                "room_id": room_id
+                            }
+                            for m in members:
+                                await self.send_to_user(m, notif)
+                            await self.send_to_user(uid, notif)
 
                 # 7. CREATE CHANNEL
                 elif msg_type == "create_channel":

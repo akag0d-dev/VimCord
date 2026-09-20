@@ -8,6 +8,7 @@ use crate::config::{load_config, save_config};
 use crate::net_tcp::TcpClient;
 use crate::net_udp::UdpVoiceClient;
 
+#[derive(Clone)]
 pub struct AppState {
     pub tcp: Arc<Mutex<TcpClient>>,
     pub udp: Arc<Mutex<UdpVoiceClient>>,
@@ -373,19 +374,7 @@ pub async fn save_file_to_disk(filename: String, b64_data: String) -> Result<Val
     }))
 }
 
-#[tauri::command]
-pub async fn join_voice(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    room_id: String,
-    channel_id: String,
-) -> Result<(), String> {
-    state.tcp.lock().await.send(serde_json::json!({
-        "type": "join_voice",
-        "room_id": room_id,
-        "channel_id": channel_id
-    }));
-
+pub async fn ensure_udp_active(app: &AppHandle, state: &AppState) {
     let uid = state.my_user_id.lock().await.clone();
     if !uid.is_empty() && !state.udp.lock().await.is_running() {
         let cfg = load_config();
@@ -404,6 +393,22 @@ pub async fn join_voice(
 
         let _ = state.udp.lock().await.start(uid, host, udp_port, app.clone()).await;
     }
+}
+
+#[tauri::command]
+pub async fn join_voice(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    room_id: String,
+    channel_id: String,
+) -> Result<(), String> {
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "join_voice",
+        "room_id": room_id,
+        "channel_id": channel_id
+    }));
+
+    ensure_udp_active(&app, &state).await;
 
     state.audio.set_voice_target(Some((crate::protocol::UDP_TYPE_CHANNEL_AUDIO, channel_id)));
     state.audio.ensure_capture_and_playback(&app);
@@ -420,7 +425,8 @@ pub async fn leave_voice(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn start_call(state: State<'_, AppState>, target_user_id: String) -> Result<(), String> {
+pub async fn start_call(app: AppHandle, state: State<'_, AppState>, target_user_id: String) -> Result<(), String> {
+    ensure_udp_active(&app, &state).await;
     state.tcp.lock().await.send(serde_json::json!({
         "type": "call_start",
         "target_user_id": target_user_id
@@ -429,7 +435,10 @@ pub async fn start_call(state: State<'_, AppState>, target_user_id: String) -> R
 }
 
 #[tauri::command]
-pub async fn accept_call(state: State<'_, AppState>, call_id: String) -> Result<(), String> {
+pub async fn accept_call(app: AppHandle, state: State<'_, AppState>, call_id: String) -> Result<(), String> {
+    ensure_udp_active(&app, &state).await;
+    state.audio.set_voice_target(Some((crate::protocol::UDP_TYPE_DM_AUDIO, call_id.clone())));
+    state.audio.ensure_capture_and_playback(&app);
     state.tcp.lock().await.send(serde_json::json!({
         "type": "call_accept",
         "call_id": call_id
@@ -439,6 +448,7 @@ pub async fn accept_call(state: State<'_, AppState>, call_id: String) -> Result<
 
 #[tauri::command]
 pub async fn decline_call(state: State<'_, AppState>, call_id: String) -> Result<(), String> {
+    state.audio.set_voice_target(None);
     state.tcp.lock().await.send(serde_json::json!({
         "type": "call_decline",
         "call_id": call_id
@@ -448,12 +458,12 @@ pub async fn decline_call(state: State<'_, AppState>, call_id: String) -> Result
 
 #[tauri::command]
 pub async fn end_call(state: State<'_, AppState>, call_id: Option<String>) -> Result<(), String> {
-    if let Some(cid) = call_id {
-        state.tcp.lock().await.send(serde_json::json!({
-            "type": "call_end",
-            "call_id": cid
-        }));
-    }
+    state.audio.set_voice_target(None);
+    let cid = call_id.unwrap_or_default();
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "call_end",
+        "call_id": cid
+    }));
     Ok(())
 }
 
@@ -471,6 +481,9 @@ pub async fn set_mic_muted(state: State<'_, AppState>, muted: bool) -> Result<()
 #[tauri::command]
 pub async fn set_deafened(state: State<'_, AppState>, deafened: bool) -> Result<(), String> {
     state.audio.set_deafened(deafened);
+    if deafened {
+        state.audio.set_muted(true);
+    }
     state.tcp.lock().await.send(serde_json::json!({
         "type": "user_media_state",
         "is_muted": deafened,
@@ -843,6 +856,22 @@ pub async fn stop_screen_share(
             "target_id": tid
         }));
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn send_screen_frame(
+    state: State<'_, AppState>,
+    target_type: String,
+    target_id: String,
+    frame: String,
+) -> Result<(), String> {
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "screen_frame",
+        "target_type": target_type,
+        "target_id": target_id,
+        "data": frame
+    }));
     Ok(())
 }
 

@@ -337,6 +337,9 @@ body {
     margin-bottom: 2px;
     text-align: left;
     transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    min-height: 38px;
+    box-sizing: border-box;
 }
 .sidebar-item:hover {
     background-color: var(--bg-hover);
@@ -827,12 +830,12 @@ body {
 
 /* Chat Messages Feed */
 #chat-messages-container {
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden !important;
     padding: 16px;
-    display: flex;
-    flex-direction: column;
+    display: block;
     min-width: 0;
     max-width: 100%;
     width: 100%;
@@ -847,6 +850,8 @@ body {
     width: 100%;
     overflow-x: hidden !important;
     box-sizing: border-box;
+    flex-shrink: 0;
+    min-height: min-content;
 }
 .chat-message-row, .message-group {
     display: flex !important;
@@ -861,6 +866,9 @@ body {
     box-sizing: border-box;
     overflow: hidden;
     transition: background-color 0.12s ease;
+    flex-shrink: 0 !important;
+    min-height: fit-content !important;
+    height: auto !important;
 }
 .chat-message-row:hover, .message-group:hover {
     background-color: rgba(255, 255, 255, 0.04);

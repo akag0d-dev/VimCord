@@ -94,6 +94,7 @@ pub fn run() {
             commands::play_voice_message,
             commands::start_screen_share,
             commands::stop_screen_share,
+            commands::send_screen_frame,
             commands::record_keybind_start,
             commands::get_clipboard_image,
         ])

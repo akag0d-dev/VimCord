@@ -287,7 +287,7 @@ function bindDomEvents() {
     document.getElementById('btn-voice-screenshare').onclick = toggleScreenShare;
     document.getElementById('btn-stage-screen').onclick = toggleScreenShare;
     document.getElementById('btn-call-screenshare').onclick = toggleScreenShare;
-    document.getElementById('btn-call-end').onclick = () => window.pywebview.api.end_call();
+    document.getElementById('btn-call-end').onclick = () => window.pywebview.api.end_call(state.activeCallId);
     document.getElementById('btn-stage-leave').onclick = () => window.pywebview.api.leave_voice();
 
     // User Panel Controls
@@ -2769,22 +2769,161 @@ function updateScreenShareButtons(active) {
         btnCall.classList.toggle('active', active);
         btnCall.classList.toggle('streaming', active);
     }
+    const btnStage = document.getElementById('btn-stage-screen');
+    if (btnStage) {
+        btnStage.classList.toggle('active', active);
+        btnStage.classList.toggle('streaming', active);
+    }
+}
+
+async function startScreenShare() {
+    const targetType = state.activeCallId ? 'call' : (state.currentVoiceChannelId ? 'channel' : (state.currentDmPeerId ? 'dm' : null));
+    const targetId = state.activeCallId || state.currentVoiceChannelId || state.currentDmPeerId;
+
+    if (!targetId || !targetType) {
+        showToast('Присоединитесь к голосовому каналу или звонку для демонстрации экрана');
+        return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        showToast('Захват экрана не поддерживается в данной среде');
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                cursor: "always",
+                frameRate: { max: 15 }
+            },
+            audio: false
+        });
+
+        state.screenStream = stream;
+        state.isSharingScreen = true;
+        updateScreenShareButtons(true);
+
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Show local preview box
+        const stageBox = document.getElementById('voice-screen-stream-box');
+        const dmBox = document.getElementById('dm-call-screen-container');
+        if (targetType === 'call' || targetType === 'dm') {
+            if (dmBox) dmBox.classList.remove('hidden');
+        } else {
+            if (stageBox) stageBox.classList.remove('hidden');
+            const stageView = document.getElementById('view-voice-stage');
+            if (stageView && state.currentVoiceChannelId) {
+                stageView.classList.remove('hidden');
+                document.getElementById('view-chat').classList.add('hidden');
+                document.getElementById('view-friends').classList.add('hidden');
+            }
+        }
+
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+            videoTrack.onended = () => {
+                stopScreenShare();
+            };
+        }
+
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.start_screen_share === 'function') {
+            window.pywebview.api.start_screen_share(targetType, targetId);
+        }
+
+        // Stream frames at ~12-15 fps (80ms interval)
+        if (state.screenInterval) {
+            clearInterval(state.screenInterval);
+        }
+        state.screenInterval = setInterval(() => {
+            if (!state.isSharingScreen || !videoTrack || videoTrack.readyState !== 'live') {
+                stopScreenShare();
+                return;
+            }
+
+            if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+            // Target max 960 width or height to maintain fast transmission
+            const maxDim = 960;
+            let w = video.videoWidth;
+            let h = video.videoHeight;
+            if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                    h = Math.round(h * (maxDim / w));
+                    w = maxDim;
+                } else {
+                    w = Math.round(w * (maxDim / h));
+                    h = maxDim;
+                }
+            }
+
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(video, 0, 0, w, h);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.55);
+            const b64 = dataUrl.split(',')[1];
+            if (!b64) return;
+
+            // Update local display immediately
+            onLocalScreenFrame({ frame: b64 });
+
+            // Transmit to server via TCP
+            if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.send_screen_frame === 'function') {
+                window.pywebview.api.send_screen_frame(targetType, targetId, b64);
+            }
+        }, 80);
+
+        showToast('Screen sharing started / Демонстрация экрана запущена');
+    } catch (err) {
+        console.warn('Screen share error or user cancelled:', err);
+        state.isSharingScreen = false;
+        updateScreenShareButtons(false);
+        if (err && err.name !== 'NotAllowedError') {
+            showToast('Не удалось запустить демонстрацию экрана');
+        }
+    }
+}
+
+function stopScreenShare() {
+    if (state.screenInterval) {
+        clearInterval(state.screenInterval);
+        state.screenInterval = null;
+    }
+    if (state.screenStream) {
+        state.screenStream.getTracks().forEach(t => t.stop());
+        state.screenStream = null;
+    }
+    state.isSharingScreen = false;
+    updateScreenShareButtons(false);
+
+    const targetType = state.activeCallId ? 'call' : (state.currentVoiceChannelId ? 'channel' : (state.currentDmPeerId ? 'dm' : 'channel'));
+    const targetId = state.activeCallId || state.currentVoiceChannelId || state.currentDmPeerId;
+
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.stop_screen_share === 'function') {
+        window.pywebview.api.stop_screen_share(targetType, targetId);
+    }
+
+    const stageBox = document.getElementById('voice-screen-stream-box');
+    if (stageBox) stageBox.classList.add('hidden');
+    const dmBox = document.getElementById('dm-call-screen-container');
+    if (dmBox) dmBox.classList.add('hidden');
+
+    showToast('Screen sharing stopped / Демонстрация экрана остановлена');
 }
 
 function toggleScreenShare() {
-    state.isSharingScreen = !state.isSharingScreen;
-    updateScreenShareButtons(state.isSharingScreen);
-    const targetType = state.currentDmPeerId ? 'dm' : 'channel';
-    const targetId = state.currentDmPeerId || state.currentVoiceChannelId || state.currentChannelId;
-
     if (state.isSharingScreen) {
-        window.pywebview.api.start_screen_share(targetType, targetId);
-        showToast('Screen sharing started');
+        stopScreenShare();
     } else {
-        window.pywebview.api.stop_screen_share(targetType, targetId);
-        showToast('Screen sharing stopped');
-        document.getElementById('voice-screen-stream-box').classList.add('hidden');
-        document.getElementById('dm-call-screen-container').classList.add('hidden');
+        startScreenShare();
     }
 }
 
@@ -2888,14 +3027,30 @@ function toggleMic() {
 
 function toggleDeafen() {
     state.isDeafened = !state.isDeafened;
-    const btn = document.getElementById('btn-toggle-deafen');
-    btn.classList.toggle('active', state.isDeafened);
+    const btnDeafen = document.getElementById('btn-toggle-deafen');
+    btnDeafen.classList.toggle('active', state.isDeafened);
     document.getElementById('deafen-icon-svg').textContent = state.isDeafened ? 'headset_off' : 'headphones';
-    btn.title = state.isDeafened ? t('undeafen_audio', 'Undeafen') : t('deafen_audio', 'Deafen');
+    btnDeafen.title = state.isDeafened ? t('undeafen_audio', 'Undeafen') : t('deafen_audio', 'Deafen');
+
+    // When deafening, automatically mute microphone; when undeafening, restore prior mute state
+    if (state.isDeafened) {
+        state.wasMutedBeforeDeafen = Boolean(state.isMuted);
+        state.isMuted = true;
+    } else {
+        state.isMuted = Boolean(state.wasMutedBeforeDeafen);
+    }
+    const btnMic = document.getElementById('btn-toggle-mic');
+    if (btnMic) {
+        btnMic.classList.toggle('active', state.isMuted);
+        document.getElementById('mic-icon-svg').textContent = state.isMuted ? 'mic_off' : 'mic';
+        btnMic.title = state.isMuted ? t('unmute_mic', 'Unmute') : t('mute_mic', 'Mute');
+    }
+
     if (state.user) {
         updateVoiceUserMediaState(state.user.user_id, state.isMuted, state.isDeafened);
     }
     window.pywebview.api.set_deafened(state.isDeafened);
+    window.pywebview.api.set_mic_muted(state.isMuted);
 }
 
 // ---------------- Settings Dialog (3-Page PyQt Parity) ----------------

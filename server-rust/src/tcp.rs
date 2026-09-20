@@ -568,12 +568,20 @@ async fn handle_connection(state: SharedState, socket: TcpStream, peer: SocketAd
             // 6. DELETE ROOM
             "delete_room" => {
                 let room_id = msg.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
+                let members: Vec<String> = {
+                    let s = state.read().await;
+                    s.db.get_room_members(room_id).into_iter().map(|m| m.user_id).collect()
+                };
                 let ok = {
                     let mut s = state.write().await;
                     s.delete_room(room_id)
                 };
                 if ok {
-                    send_to_room_members(&state, room_id, &json!({ "type": "room_deleted", "room_id": room_id })).await;
+                    let notif = json!({ "type": "room_deleted", "room_id": room_id });
+                    for member_id in &members {
+                        send_to_user(&state, member_id, &notif).await;
+                    }
+                    send_to_user(&state, &uid, &notif).await;
                 }
             }
 
@@ -1125,11 +1133,16 @@ async fn handle_connection(state: SharedState, socket: TcpStream, peer: SocketAd
                 let call_id = msg.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                 let session_opt = {
                     let mut s = state.write().await;
-                    s.end_call(call_id)
+                    let target_cid = if !call_id.is_empty() {
+                        call_id.to_string()
+                    } else {
+                        s.users.get(&uid).and_then(|u| u.active_call_id.clone()).unwrap_or_default()
+                    };
+                    s.end_call(&target_cid)
                 };
 
                 if let Some(session) = session_opt {
-                    let end_event = json!({ "type": "call_ended", "call_id": call_id });
+                    let end_event = json!({ "type": "call_ended", "call_id": session.call_id });
                     send_to_user(&state, &session.caller_id, &end_event).await;
                     send_to_user(&state, &session.callee_id, &end_event).await;
                 }

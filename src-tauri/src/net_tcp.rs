@@ -240,7 +240,10 @@ impl TcpClient {
             }
             "call_ringing" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
-                let tid = val.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
+                let tid = val.get("target_id")
+                    .or_else(|| val.get("target_user_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 dispatch_event(app, "call_ringing", serde_json::json!({
                     "call_id": cid,
                     "target_id": tid
@@ -251,6 +254,11 @@ impl TcpClient {
                 let pid = val.get("peer_id").and_then(|v| v.as_str()).unwrap_or("");
                 let pname = val.get("peer_name").and_then(|v| v.as_str()).unwrap_or("");
                 if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                    let app_cl = app.clone();
+                    let st_cl = st.inner().clone();
+                    tokio::spawn(async move {
+                        crate::commands::ensure_udp_active(&app_cl, &st_cl).await;
+                    });
                     st.audio.set_voice_target(Some((crate::protocol::UDP_TYPE_DM_AUDIO, cid.to_string())));
                     st.audio.ensure_capture_and_playback(app);
                 }

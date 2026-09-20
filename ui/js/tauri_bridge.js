@@ -265,6 +265,12 @@
                             targetType: args[0] ? String(args[0]) : null,
                             targetId: args[1] ? String(args[1]) : null
                         });
+                    } else if (cmd === 'send_screen_frame') {
+                        return invoke('send_screen_frame', {
+                            targetType: String(args[0] || "channel"),
+                            targetId: String(args[1] || ""),
+                            frame: String(args[2] || "")
+                        });
                     } else if (cmd === 'record_keybind_start') {
                         return invoke('record_keybind_start', {});
                     } else if (cmd === 'get_clipboard_image') {

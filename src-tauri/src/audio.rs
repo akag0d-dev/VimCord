@@ -315,6 +315,7 @@ impl AudioManager {
         let stream_config: cpal::StreamConfig = config.into();
 
         let is_muted = self.is_muted.clone();
+        let is_deafened = self.is_deafened.clone();
         let ptt_mode = self.ptt_mode.clone();
         let ptt_active = self.ptt_active.clone();
         let mic_volume = self.mic_volume.clone();
@@ -337,7 +338,7 @@ impl AudioManager {
         let stream = device.build_input_stream(
             &stream_config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                let muted = is_muted.load(Ordering::Relaxed);
+                let muted = is_muted.load(Ordering::Relaxed) || is_deafened.load(Ordering::Relaxed);
                 let mic_vol = mic_volume.get();
                 let vad_thresh = vad_threshold.get();
                 let num_frames = data.len() / in_channels.max(1);
