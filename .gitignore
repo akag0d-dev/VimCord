@@ -48,3 +48,9 @@ logs/
 # SQLite Databases
 *.db
 *.sqlite3
+
+# Rust / Tauri
+target/
+src-tauri/target/
+*.exe
+

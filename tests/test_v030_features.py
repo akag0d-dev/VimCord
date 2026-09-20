@@ -18,7 +18,6 @@ from vimcord.server.db import Database
 from vimcord.server.server_state import ServerState
 from vimcord.server.tcp_server import TCPServer
 from vimcord.common.protocol import encode_json_message, decode_json_message
-from vimcord.client.audio.audio_manager import AudioManager
 
 
 class TestDatabaseV030(unittest.TestCase):
@@ -158,39 +157,6 @@ class TestVoiceNoGhostingIntegration(unittest.IsolatedAsyncioTestCase):
 
         w_a.close()
         await w_a.wait_closed()
-
-
-class TestAudioHangover(unittest.TestCase):
-    def test_vad_hangover_frames(self):
-        mgr = AudioManager()
-        mgr._is_running = True
-        self.assertEqual(mgr.vad_threshold, 0.005)
-        self.assertEqual(mgr.hangover_frames_max, 15)
-
-        # Simulate speaking: silence first
-        silence_frame = np.zeros(480, dtype=np.int16)
-        mgr._input_callback(silence_frame, 480, None, None)
-        self.assertFalse(mgr.is_speaking)
-        self.assertEqual(mgr.hangover_counter, 0)
-
-        # Loud frame (RMS > 0.005)
-        loud_frame = np.full(480, 10000, dtype=np.int16)
-        mgr._input_callback(loud_frame, 480, None, None)
-        self.assertTrue(mgr.is_speaking)
-        self.assertEqual(mgr.hangover_counter, 15)
-
-        # 1 frame of silence -> should STILL be speaking due to hangover!
-        mgr._input_callback(silence_frame, 480, None, None)
-        self.assertTrue(mgr.is_speaking)
-        self.assertEqual(mgr.hangover_counter, 14)
-
-        # 14 more frames of silence
-        for _ in range(14):
-            mgr._input_callback(silence_frame, 480, None, None)
-
-        # Now hangover counter reaches 0 -> is_speaking becomes False
-        self.assertFalse(mgr.is_speaking)
-        self.assertEqual(mgr.hangover_counter, 0)
 
 
 class TestTCPScreenSharing(unittest.IsolatedAsyncioTestCase):

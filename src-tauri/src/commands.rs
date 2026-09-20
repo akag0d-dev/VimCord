@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::audio::AudioManager;
-use crate::config::{load_config, save_config, ClientConfig};
+use crate::config::{load_config, save_config};
 use crate::net_tcp::TcpClient;
 use crate::net_udp::UdpVoiceClient;
 
@@ -29,7 +29,7 @@ impl AppState {
 }
 
 #[tauri::command]
-pub async fn get_initial_state(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn get_initial_state(_state: State<'_, AppState>) -> Result<Value, String> {
     let cfg = load_config();
     let devices = AudioManager::get_devices();
 
@@ -173,7 +173,7 @@ pub async fn register(
     password: Option<String>,
     host: Option<String>,
     tcp_port: Option<u16>,
-    udp_port: Option<u16>,
+    _udp_port: Option<u16>,
 ) -> Result<Value, String> {
     let cfg = load_config();
     let pwd = password.unwrap_or_default();
@@ -642,3 +642,170 @@ pub async fn change_password(
     }));
     Ok(())
 }
+
+#[tauri::command]
+pub async fn reconnect(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    let cfg = load_config();
+    if !cfg.saved_username.is_empty() {
+        let pwd = if cfg.auto_login { cfg.saved_password.clone() } else { String::new() };
+        login(
+            app,
+            state,
+            cfg.saved_username,
+            Some(pwd),
+            Some(cfg.host),
+            Some(cfg.tcp_port),
+            Some(cfg.udp_port),
+            Some(cfg.auto_login),
+        ).await
+    } else {
+        Ok(serde_json::json!({ "success": false, "message": "No saved credentials to reconnect" }))
+    }
+}
+
+#[tauri::command]
+pub async fn create_room_invite(state: State<'_, AppState>, room_id: String) -> Result<(), String> {
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "create_room_invite",
+        "room_id": room_id
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn join_room_by_invite(state: State<'_, AppState>, code: String) -> Result<(), String> {
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "join_room_by_invite",
+        "code": code.trim()
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_room_members(state: State<'_, AppState>, room_id: String) -> Result<(), String> {
+    state.tcp.lock().await.send(serde_json::json!({
+        "type": "get_room_members",
+        "room_id": room_id
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_audio_devices(
+    input_device: Option<u32>,
+    output_device: Option<u32>,
+) -> Result<(), String> {
+    let mut cfg = load_config();
+    if let Some(in_dev) = input_device {
+        cfg.input_device = Some(in_dev);
+    }
+    if let Some(out_dev) = output_device {
+        cfg.output_device = Some(out_dev);
+    }
+    save_config(&cfg);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_ptt_config(
+    enabled: bool,
+    hotkey: Option<String>,
+) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.ptt_mode = enabled;
+    if let Some(k) = hotkey {
+        cfg.ptt_key = k;
+    }
+    save_config(&cfg);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_stream_settings(
+    resolution: String,
+    fps: u32,
+    quality: u32,
+) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.stream_resolution = resolution;
+    cfg.stream_fps = fps;
+    cfg.stream_quality = quality;
+    save_config(&cfg);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_mic_test(app: AppHandle) -> Result<(), String> {
+    crate::net_tcp::dispatch_event(&app, "mic_test_level", serde_json::json!({
+        "level": 50,
+        "speaking": true
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_mic_test(app: AppHandle) -> Result<(), String> {
+    crate::net_tcp::dispatch_event(&app, "mic_test_level", serde_json::json!({
+        "level": 0,
+        "speaking": false
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_voice_record() -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_voice_record() -> Result<Value, String> {
+    Ok(serde_json::json!({
+        "data": "",
+        "duration": 0.0
+    }))
+}
+
+#[tauri::command]
+pub async fn play_voice_message(_voice_data: String, _duration: Option<f64>) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_screen_share(
+    _state: State<'_, AppState>,
+    _target_type: String,
+    _target_id: String,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_screen_share(
+    state: State<'_, AppState>,
+    target_type: Option<String>,
+    target_id: Option<String>,
+) -> Result<(), String> {
+    if let Some(tid) = target_id {
+        let tt = target_type.unwrap_or_else(|| "channel".to_string());
+        state.tcp.lock().await.send(serde_json::json!({
+            "type": "screen_stop",
+            "target_type": tt,
+            "target_id": tid
+        }));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn record_keybind_start(app: AppHandle) -> Result<(), String> {
+    crate::net_tcp::dispatch_event(&app, "keybind_captured", serde_json::json!({
+        "key": "Space"
+    }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_clipboard_image() -> Result<Value, String> {
+    Ok(Value::Null)
+}
+

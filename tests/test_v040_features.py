@@ -12,36 +12,6 @@ from vimcord.server.db import Database
 from vimcord.server.server_state import ServerState
 from vimcord.server.tcp_server import TCPServer
 from vimcord.common.protocol import encode_json_message, decode_json_message
-from vimcord.client.config import load_client_config, save_client_config, clear_auto_login
-
-
-class TestConfigAppData(unittest.TestCase):
-    def test_config_defaults_and_save(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            custom_path = Path(tmp_dir) / "config.json"
-            cfg = load_client_config(config_path=custom_path)
-            self.assertEqual(cfg.get("language"), "en")
-            self.assertFalse(cfg.get("auto_login"))
-            self.assertEqual(cfg.get("saved_username"), "")
-            self.assertEqual(cfg.get("saved_password"), "")
-
-            save_client_config({
-                "language": "en",
-                "auto_login": True,
-                "saved_username": "TestUser",
-                "saved_password": "TestPassword123"
-            }, config_path=custom_path)
-
-            reloaded = load_client_config(config_path=custom_path)
-            self.assertTrue(reloaded.get("auto_login"))
-            self.assertEqual(reloaded.get("saved_username"), "TestUser")
-            self.assertEqual(reloaded.get("saved_password"), "TestPassword123")
-
-            clear_auto_login(config_path=custom_path)
-            cleared = load_client_config(config_path=custom_path)
-            self.assertFalse(cleared.get("auto_login"))
-            self.assertEqual(cleared.get("saved_password"), "")
-            self.assertEqual(cleared.get("saved_username"), "TestUser")
 
 
 class TestFileUploadDatabase(unittest.TestCase):

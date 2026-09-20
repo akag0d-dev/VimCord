@@ -77,6 +77,22 @@ pub fn run() {
             commands::decline_friend_request,
             commands::update_profile,
             commands::change_password,
+            commands::reconnect,
+            commands::create_room_invite,
+            commands::join_room_by_invite,
+            commands::get_room_members,
+            commands::set_audio_devices,
+            commands::set_ptt_config,
+            commands::set_stream_settings,
+            commands::start_mic_test,
+            commands::stop_mic_test,
+            commands::start_voice_record,
+            commands::stop_voice_record,
+            commands::play_voice_message,
+            commands::start_screen_share,
+            commands::stop_screen_share,
+            commands::record_keybind_start,
+            commands::get_clipboard_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

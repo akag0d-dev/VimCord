@@ -3,7 +3,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub struct TcpClient {
     write_tx: Option<mpsc::UnboundedSender<String>>,
@@ -65,10 +65,7 @@ impl TcpClient {
             let mut reader = BufReader::new(read_half);
             let mut line = String::new();
 
-            let _ = app_clone.emit("vimcord://event", serde_json::json!({
-                "event": "connected",
-                "payload": {}
-            }));
+            dispatch_event(&app_clone, "connected", serde_json::json!({}));
 
             loop {
                 line.clear();
@@ -94,10 +91,7 @@ impl TcpClient {
             }
 
             *is_conn_reader.lock().await = false;
-            let _ = app_clone.emit("vimcord://event", serde_json::json!({
-                "event": "disconnected",
-                "payload": {}
-            }));
+            dispatch_event(&app_clone, "disconnected", serde_json::json!({}));
         });
 
         Ok(())
@@ -119,165 +113,134 @@ impl TcpClient {
     fn dispatch_server_message(app: &AppHandle, val: Value) {
         let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match msg_type {
-            "login_response" => {
+            "login_resp" | "login_response" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "login_response",
-                    "payload": {
-                        "success": ok,
-                        "data": val
+                if ok {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.set_size(tauri::LogicalSize::new(1280.0, 800.0));
+                        let _ = w.center();
                     }
+                }
+                dispatch_event(app, "login_response", serde_json::json!({
+                    "success": ok,
+                    "data": val
                 }));
             }
-            "register_response" => {
+            "register_resp" | "register_response" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
                 let msg = val.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "register_response",
-                    "payload": {
-                        "success": ok,
-                        "message": msg
-                    }
+                dispatch_event(app, "register_response", serde_json::json!({
+                    "success": ok,
+                    "message": msg
                 }));
             }
-            "chat_message" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "chat_message",
-                    "payload": val
-                }));
+            "new_msg" | "chat_message" => {
+                dispatch_event(app, "chat_message", val);
             }
-            "history_response" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "history_response",
-                    "payload": val
-                }));
+            "history_resp" | "history_response" => {
+                dispatch_event(app, "history_response", val);
             }
-            "message_deleted" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "message_deleted",
-                    "payload": val
-                }));
+            "msg_deleted" | "message_deleted" => {
+                dispatch_event(app, "message_deleted", val);
             }
             "user_presence" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "user_presence",
-                    "payload": val
-                }));
+                dispatch_event(app, "user_presence", val);
             }
             "room_created" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "room_created",
-                    "payload": val
-                }));
+                dispatch_event(app, "room_created", val);
             }
             "room_deleted" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "room_deleted",
-                    "payload": rid
-                }));
+                dispatch_event(app, "room_deleted", serde_json::json!(rid));
             }
             "channel_created" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
                 let ch = val.get("channel").cloned().unwrap_or(Value::Null);
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "channel_created",
-                    "payload": { "room_id": rid, "channel": ch }
+                dispatch_event(app, "channel_created", serde_json::json!({
+                    "room_id": rid,
+                    "channel": ch
                 }));
             }
             "channel_deleted" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
                 let cid = val.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "channel_deleted",
-                    "payload": { "room_id": rid, "channel_id": cid }
+                dispatch_event(app, "channel_deleted", serde_json::json!({
+                    "room_id": rid,
+                    "channel_id": cid
                 }));
             }
             "channel_renamed" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
                 let cid = val.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
                 let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "channel_renamed",
-                    "payload": { "room_id": rid, "channel_id": cid, "name": name }
+                dispatch_event(app, "channel_renamed", serde_json::json!({
+                    "room_id": rid,
+                    "channel_id": cid,
+                    "name": name
                 }));
             }
             "voice_state_update" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "voice_state_update",
-                    "payload": val
-                }));
+                dispatch_event(app, "voice_state_update", val);
             }
             "voice_channel_sync" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "voice_channel_sync",
-                    "payload": val
-                }));
+                dispatch_event(app, "voice_channel_sync", val);
             }
             "friends_update" => {
                 let fl = val.get("friends").cloned().unwrap_or(Value::Array(vec![]));
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "friends_update",
-                    "payload": fl
-                }));
+                dispatch_event(app, "friends_update", fl);
             }
             "friend_request_resp" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
                 let msg = val.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "friend_request_resp",
-                    "payload": { "success": ok, "message": msg }
+                dispatch_event(app, "friend_request_resp", serde_json::json!({
+                    "success": ok,
+                    "message": msg
                 }));
             }
             "incoming_call" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                 let uid = val.get("from_user_id").and_then(|v| v.as_str()).unwrap_or("");
                 let uname = val.get("from_username").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "incoming_call",
-                    "payload": {
-                        "call_id": cid,
-                        "from_user_id": uid,
-                        "from_username": uname
-                    }
+                dispatch_event(app, "incoming_call", serde_json::json!({
+                    "call_id": cid,
+                    "from_user_id": uid,
+                    "from_username": uname
                 }));
             }
             "call_ringing" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                 let tid = val.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "call_ringing",
-                    "payload": { "call_id": cid, "target_id": tid }
+                dispatch_event(app, "call_ringing", serde_json::json!({
+                    "call_id": cid,
+                    "target_id": tid
                 }));
             }
             "call_accepted" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                 let pid = val.get("peer_id").and_then(|v| v.as_str()).unwrap_or("");
                 let pname = val.get("peer_name").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "call_accepted",
-                    "payload": { "call_id": cid, "peer_id": pid, "peer_name": pname }
+                dispatch_event(app, "call_accepted", serde_json::json!({
+                    "call_id": cid,
+                    "peer_id": pid,
+                    "peer_name": pname
                 }));
             }
             "call_declined" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "call_declined",
-                    "payload": { "call_id": cid }
+                dispatch_event(app, "call_declined", serde_json::json!({
+                    "call_id": cid
                 }));
             }
             "call_ended" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "call_ended",
-                    "payload": { "call_id": cid }
+                dispatch_event(app, "call_ended", serde_json::json!({
+                    "call_id": cid
                 }));
             }
             "call_failed" => {
                 let r = val.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "call_failed",
-                    "payload": { "reason": r }
+                dispatch_event(app, "call_failed", serde_json::json!({
+                    "reason": r
                 }));
             }
             "pong" => {
@@ -287,80 +250,86 @@ impl TcpClient {
                     .unwrap_or_default()
                     .as_secs_f64();
                 let rtt_ms = ((now - ts).max(0.0) * 1000.0) as u32;
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "pong",
-                    "payload": { "ping_ms": rtt_ms }
+                dispatch_event(app, "pong", serde_json::json!({
+                    "ping_ms": rtt_ms
                 }));
             }
             "profile_update_resp" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "profile_update_resp",
-                    "payload": val
-                }));
+                dispatch_event(app, "profile_update_resp", val);
             }
             "user_media_state" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "user_media_state",
-                    "payload": val
-                }));
+                dispatch_event(app, "user_media_state", val);
             }
             "change_password_resp" => {
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "change_password_resp",
-                    "payload": val
-                }));
+                dispatch_event(app, "change_password_resp", val);
             }
             "room_invite_created" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
                 let code = val.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "room_invite_created",
-                    "payload": { "room_id": rid, "code": code }
+                dispatch_event(app, "room_invite_created", serde_json::json!({
+                    "room_id": rid,
+                    "code": code
                 }));
             }
             "room_invite_joined" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
                 let data = val.get("data").cloned().unwrap_or(Value::Null);
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "room_invite_joined",
-                    "payload": { "success": ok, "data": data }
+                dispatch_event(app, "room_invite_joined", serde_json::json!({
+                    "success": ok,
+                    "data": data
                 }));
             }
             "leave_room_resp" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
                 let msg = val.get("message").and_then(|v| v.as_str()).unwrap_or("");
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "leave_room_resp",
-                    "payload": { "success": ok, "message": msg, "room_id": rid }
+                dispatch_event(app, "leave_room_resp", serde_json::json!({
+                    "success": ok,
+                    "message": msg,
+                    "room_id": rid
                 }));
             }
             "room_members_resp" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
                 let members = val.get("members").cloned().unwrap_or(Value::Array(vec![]));
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "room_members_resp",
-                    "payload": { "room_id": rid, "members": members }
+                dispatch_event(app, "room_members_resp", serde_json::json!({
+                    "room_id": rid,
+                    "members": members
                 }));
             }
             "screen_frame" => {
                 let sid = val.get("sender_id").and_then(|v| v.as_str()).unwrap_or("");
                 let frame = val.get("data").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "screen_frame",
-                    "payload": { "sender_id": sid, "frame": frame }
+                dispatch_event(app, "screen_frame", serde_json::json!({
+                    "sender_id": sid,
+                    "frame": frame
                 }));
             }
             "screen_stop" => {
                 let sid = val.get("sender_id").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = app.emit("vimcord://event", serde_json::json!({
-                    "event": "screen_stop",
-                    "payload": { "sender_id": sid }
+                dispatch_event(app, "screen_stop", serde_json::json!({
+                    "sender_id": sid
                 }));
             }
             _ => {
                 log::debug!("Unhandled server message: {:?}", val);
             }
+        }
+    }
+}
+
+pub fn dispatch_event(app: &AppHandle, event_name: &str, payload: Value) {
+    let _ = app.emit("vimcord://event", serde_json::json!({
+        "event": event_name,
+        "payload": &payload
+    }));
+    if let Some(w) = app.get_webview_window("main") {
+        if let (Ok(evt_json), Ok(payload_json)) = (serde_json::to_string(event_name), serde_json::to_string(&payload)) {
+            let js = format!(
+                "if (typeof window.dispatchVimCordEvent === 'function') {{ window.dispatchVimCordEvent({}, {}); }} else if (typeof window.onVimCordEvent === 'function') {{ window.onVimCordEvent({}, {}); }}",
+                evt_json, payload_json, evt_json, payload_json
+            );
+            let _ = w.eval(&js);
         }
     }
 }

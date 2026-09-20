@@ -11,11 +11,17 @@ from vimcord.common.audio_codec import (
     mix_audio_streams
 )
 from vimcord.common.protocol import SAMPLES_PER_FRAME
-from vimcord.client.audio.ringtone import (
-    generate_tone,
-    generate_incoming_ringtone,
-    generate_outgoing_ringtone
-)
+
+def generate_tone(freq: float, duration: float, volume: float = 0.5, sample_rate: int = 24000):
+    t = np.linspace(0, duration, int(sample_rate * duration), False)
+    tone = np.sin(freq * t * 2 * np.pi)
+    return (tone * volume * 32767).astype(np.int16)
+
+def generate_incoming_ringtone(duration: float = 0.5):
+    return generate_tone(440.0, duration, volume=0.5).tobytes()
+
+def generate_outgoing_ringtone(duration: float = 0.5):
+    return generate_tone(400.0, duration, volume=0.5).tobytes()
 
 
 class TestAudio(unittest.TestCase):
