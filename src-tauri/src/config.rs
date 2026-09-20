@@ -28,6 +28,8 @@ pub struct ClientConfig {
     pub dnd_mode: bool,
     #[serde(default)]
     pub ptt_mode: bool,
+    #[serde(default)]
+    pub noise_suppression: bool,
     #[serde(default = "default_ptt_key")]
     pub ptt_key: String,
     #[serde(default = "default_vad_threshold")]
@@ -81,6 +83,7 @@ impl Default for ClientConfig {
             theme: default_theme(),
             dnd_mode: false,
             ptt_mode: false,
+            noise_suppression: false,
             ptt_key: default_ptt_key(),
             vad_threshold: default_vad_threshold(),
             input_device: None,

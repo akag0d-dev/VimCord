@@ -67,23 +67,57 @@ const DISCORD_COLORS = [
 const I18N = {
     en: {
         friends: "Friends", direct_messages: "DIRECT MESSAGES", text_channels: "TEXT CHANNELS",
-        voice_channels: "VOICE CHANNELS", voice_connected: "Voice Connected", mute_mic: "Mute",
+        voice_channels: "VOICE CHANNELS", voice_connected: "Voice Connected", rtc_connecting: "RTC Connecting...", mute_mic: "Mute",
         unmute_mic: "Unmute", deafen_audio: "Deafen", undeafen_audio: "Undeafen", user_settings: "User Settings",
         about_me: "My Account", voice_channel: "Voice & Video", appearance: "Appearance",
         record_keybind: "Record Keybind", send_message: "Send a message...",
         pasted_from_clipboard: "Attached from clipboard", disconnect: "Disconnect", screen_share: "Screen Share",
         online: "Online", all: "All", pending: "Pending", add_friend: "Add Friend", display_name: "DISPLAY NAME",
-        banner_color: "BANNER COLOR"
+        banner_color: "BANNER COLOR", copy_server_id: "Copy Server ID", delete_server: "Delete Server",
+        leave_server: "Leave Server", channel_type: "CHANNEL TYPE", text_channel: "Text Channel",
+        cancel: "Cancel", confirm: "Confirm", are_you_sure: "Are you sure?",
+        confirm_action_desc: "Do you really want to perform this action? This cannot be undone.",
+        change_password: "CHANGE PASSWORD", current_password: "Current Password",
+        new_password: "New Password (min 4 characters)", update_password: "Update Password",
+        ctx_copy_text: "Copy Text", ctx_open_image: "Open Original", ctx_copy_image: "Copy Image",
+        ctx_save_image: "Save Image", ctx_copy_id: "Copy ID", ctx_delete_msg: "Delete Message",
+        create_server_title: "Create a Server", create_server_desc: "Enter a name for your new server:",
+        create_server_placeholder: "e.g. My Gaming Server", create_server_btn: "Create Server",
+        join_server_title: "Join a Server", join_server_desc: "Enter an invite link or code:",
+        join_server_placeholder: "e.g. vc-abc12345", join_server_btn: "Join Server",
+        create_channel_title: "Create Channel", create_channel_desc: "Enter channel name and select type:",
+        create_channel_btn: "Create Channel", server_id_copied: "Server ID copied to clipboard!",
+        server_created: "Server created!", server_deleted: "Server deleted.",
+        joined_server: "Joined server!", left_server: "Left server.",
+        text_copied: "Text copied to clipboard", image_copied: "Image copied to clipboard",
+        copy_failed: "Failed to copy image", id_copied: "Message ID copied"
     },
     ru: {
         friends: "Друзья", direct_messages: "ЛИЧНЫЕ СООБЩЕНИЯ", text_channels: "ТЕКСТОВЫЕ КАНАЛЫ",
-        voice_channels: "ГОЛОСОВЫЕ КАНАЛЫ", voice_connected: "Голос подключен", mute_mic: "Заглушить",
+        voice_channels: "ГОЛОСОВЫЕ КАНАЛЫ", voice_connected: "Голос подключен", rtc_connecting: "Подключение к RTC...", mute_mic: "Заглушить",
         unmute_mic: "Включить", deafen_audio: "Заглушить звук", undeafen_audio: "Включить звук",
         user_settings: "Настройки пользователя", about_me: "Моя учетная запись", voice_channel: "Голос и видео",
         appearance: "Внешний вид", record_keybind: "Задать кнопку", send_message: "Написать сообщение...",
         pasted_from_clipboard: "Вставлено из буфера обмена", disconnect: "Отключиться", screen_share: "Демонстрация",
         online: "В сети", all: "Все", pending: "Ожидание", add_friend: "Добавить в друзья", display_name: "ОТОБРАЖАЕМОЕ ИМЯ",
-        banner_color: "ЦВЕТ БАННЕРА"
+        banner_color: "ЦВЕТ БАННЕРА", copy_server_id: "Копировать ID сервера", delete_server: "Удалить сервер",
+        leave_server: "Покинуть сервер", channel_type: "ТИП КАНАЛА", text_channel: "Текстовый канал",
+        cancel: "Отмена", confirm: "Подтвердить", are_you_sure: "Вы уверены?",
+        confirm_action_desc: "Вы действительно хотите выполнить это действие? Его нельзя отменить.",
+        change_password: "СМЕНИТЬ ПАРОЛЬ", current_password: "Текущий пароль",
+        new_password: "Новый пароль (мин. 4 символа)", update_password: "Обновить пароль",
+        ctx_copy_text: "Копировать текст", ctx_open_image: "Открыть оригинал", ctx_copy_image: "Копировать изображение",
+        ctx_save_image: "Сохранить изображение", ctx_copy_id: "Копировать ID", ctx_delete_msg: "Удалить сообщение",
+        create_server_title: "Создать сервер", create_server_desc: "Введите название нового сервера:",
+        create_server_placeholder: "например, Мой сервер", create_server_btn: "Создать сервер",
+        join_server_title: "Присоединиться к серверу", join_server_desc: "Введите код приглашения или ссылку:",
+        join_server_placeholder: "например, vc-abc12345", join_server_btn: "Присоединиться",
+        create_channel_title: "Создать канал", create_channel_desc: "Введите название и тип канала:",
+        create_channel_btn: "Создать канал", server_id_copied: "ID сервера скопирован в буфер!",
+        server_created: "Сервер создан!", server_deleted: "Сервер удален.",
+        joined_server: "Вы присоединились к серверу!", left_server: "Вы покинули сервер.",
+        text_copied: "Текст скопирован в буфер", image_copied: "Изображение скопировано в буфер",
+        copy_failed: "Не удалось скопировать изображение", id_copied: "ID сообщения скопирован"
     }
 };
 
@@ -150,6 +184,9 @@ async function initApp() {
         if (initData.stream_quality) {
             document.getElementById('slider-screen-quality').value = initData.stream_quality;
             document.getElementById('label-screen-quality').textContent = `${initData.stream_quality}%`;
+        }
+        if (initData.noise_suppression !== undefined) {
+            document.getElementById('settings-noise-suppression').checked = initData.noise_suppression;
         }
 
         document.getElementById('cb-dnd-mode').checked = state.dndMode;
@@ -227,9 +264,17 @@ function bindDomEvents() {
         }
     };
 
+    const sendBtn = document.getElementById('btn-send-message');
+    if (sendBtn) {
+        sendBtn.onclick = () => sendMessage();
+    }
+
     document.getElementById('btn-attach-file').onclick = chooseAttachment;
     document.getElementById('btn-clear-attachment').onclick = clearAttachment;
     document.getElementById('btn-voice-msg').onclick = toggleVoiceRecording;
+
+    // Custom Context Menu Setup
+    setupCustomContextMenu();
 
     // Clipboard Paste Listener (Ctrl + V for images & files)
     document.addEventListener('paste', handlePasteEvent);
@@ -304,6 +349,13 @@ function bindDomEvents() {
         document.getElementById('label-vad-thresh').textContent = thresh.toFixed(3);
         window.pywebview.api.set_vad_threshold(thresh);
     };
+
+    const nsCb = document.getElementById('settings-noise-suppression');
+    if (nsCb) {
+        nsCb.onchange = (e) => {
+            window.pywebview.api.set_noise_suppression(e.target.checked);
+        };
+    }
 
     document.getElementById('btn-record-keybind').onclick = startRecordKeybind;
     document.getElementById('select-ptt-preset').onchange = (e) => {
@@ -422,17 +474,33 @@ function bindDomEvents() {
             }
         });
 
-        document.getElementById('menu-opt-create-channel').onclick = () => {
-            popupServerOpts.classList.add('hidden');
-            if (arrowServer) arrowServer.classList.remove('open');
-            promptCreateChannel();
-        };
-
-        document.getElementById('menu-opt-invite').onclick = () => {
-            popupServerOpts.classList.add('hidden');
-            if (arrowServer) arrowServer.classList.remove('open');
-            promptServerInvite();
-        };
+        const optCopyId = document.getElementById('menu-opt-copy-server-id');
+        if (optCopyId) {
+            optCopyId.onclick = () => {
+                popupServerOpts.classList.add('hidden');
+                if (arrowServer) arrowServer.classList.remove('open');
+                if (state.currentRoomId) {
+                    navigator.clipboard.writeText(state.currentRoomId);
+                    showToast(t('server_id_copied', 'Server ID copied to clipboard!'));
+                }
+            };
+        }
+        const optCreateCh = document.getElementById('menu-opt-create-channel');
+        if (optCreateCh) {
+            optCreateCh.onclick = () => {
+                popupServerOpts.classList.add('hidden');
+                if (arrowServer) arrowServer.classList.remove('open');
+                promptCreateChannel();
+            };
+        }
+        const optInvite = document.getElementById('menu-opt-invite');
+        if (optInvite) {
+            optInvite.onclick = () => {
+                popupServerOpts.classList.add('hidden');
+                if (arrowServer) arrowServer.classList.remove('open');
+                promptServerInvite();
+            };
+        }
 
         document.getElementById('menu-opt-delete-server').onclick = () => {
             popupServerOpts.classList.add('hidden');
@@ -880,6 +948,11 @@ function onLoginResponse(res) {
 
     hideReconnectOverlay();
 
+    if (state.lastLoginSuccessTime && (Date.now() - state.lastLoginSuccessTime < 4000)) {
+        return;
+    }
+    state.lastLoginSuccessTime = Date.now();
+
     // Success: Transition to main workspace
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app-container').classList.remove('hidden');
@@ -1279,7 +1352,7 @@ function selectTextChannel(roomId, channelId, channelName) {
     document.getElementById('btn-header-call').classList.add('hidden');
     document.getElementById('btn-toggle-members').classList.remove('hidden');
 
-    document.getElementById('chat-messages-list').innerHTML = '';
+    renderCachedMessages('channel', channelId);
     window.pywebview.api.get_history('channel', channelId);
 }
 
@@ -1292,6 +1365,9 @@ function selectDmUser(peerId, peerName) {
     document.getElementById('view-friends').classList.add('hidden');
     document.getElementById('view-chat').classList.remove('hidden');
     document.getElementById('view-voice-stage').classList.add('hidden');
+
+    const memberSidebar = document.getElementById('member-sidebar');
+    if (memberSidebar) memberSidebar.classList.add('hidden');
 
     document.getElementById('channel-header-icon').textContent = 'forum';
     document.getElementById('channel-header-title').textContent = `@${peerName}`;
@@ -1312,13 +1388,24 @@ function selectDmUser(peerId, peerName) {
 
     document.getElementById('btn-toggle-members').classList.add('hidden');
 
-    document.getElementById('chat-messages-list').innerHTML = '';
+    renderCachedMessages('dm', peerId);
     window.pywebview.api.get_history('dm', peerId);
 }
 
 function selectVoiceChannel(roomId, channelId, channelName) {
+    const isAlreadyConnected = (state.currentVoiceChannelId === channelId);
+    
+    // If just viewing a text channel but connected to voice, clicking voice again should just show the voice stage
+    if (isAlreadyConnected) {
+        document.getElementById('view-friends').classList.add('hidden');
+        document.getElementById('view-chat').classList.add('hidden');
+        document.getElementById('view-voice-stage').classList.remove('hidden');
+        return;
+    }
+
     state.currentVoiceChannelId = channelId;
     state.currentVoiceRoomId = roomId;
+    state.currentVoiceChannelName = channelName;
 
     // Highlight active voice channel in sidebar
     document.querySelectorAll('.channel-item .sidebar-item').forEach(b => b.classList.remove('active'));
@@ -1342,8 +1429,12 @@ function selectVoiceChannel(roomId, channelId, channelName) {
         });
     }
 
-    document.getElementById('voice-status-bar').classList.remove('hidden');
-    document.getElementById('voice-status-channel').textContent = `${channelName} / Connected`;
+    const bar = document.getElementById('voice-status-bar');
+    bar.classList.remove('hidden');
+    bar.classList.remove('connected');
+    const titleEl = bar.querySelector('.voice-status-title');
+    if (titleEl) titleEl.textContent = t('rtc_connecting') || 'RTC Connecting...';
+    document.getElementById('voice-status-channel').textContent = `${channelName} / Connecting...`;
 
     document.getElementById('view-friends').classList.add('hidden');
     document.getElementById('view-chat').classList.add('hidden');
@@ -1351,7 +1442,7 @@ function selectVoiceChannel(roomId, channelId, channelName) {
 
     document.getElementById('channel-header-icon').textContent = 'volume_up';
     document.getElementById('channel-header-title').textContent = channelName;
-    document.getElementById('channel-header-desc').textContent = `Voice Channel - RTC Connected`;
+    document.getElementById('channel-header-desc').textContent = `Voice Channel - RTC Connecting...`;
     document.getElementById('btn-header-call').classList.add('hidden');
     document.getElementById('btn-toggle-members').classList.add('hidden');
 
@@ -1661,10 +1752,10 @@ function startDirectCall(userId, userName) {
 
 function promptCreateRoom() {
     showPromptModal({
-        title: 'Create a Server',
-        desc: 'Enter a name for your new server:',
-        placeholder: 'e.g. My Gaming Server',
-        confirmText: 'Create Server',
+        title: t('create_server_title', 'Create a Server'),
+        desc: t('create_server_desc', 'Enter a name for your new server:'),
+        placeholder: t('create_server_placeholder', 'e.g. My Gaming Server'),
+        confirmText: t('create_server_btn', 'Create Server'),
         showChannelType: false,
         onConfirm: (val) => {
             if (val && val.trim()) {
@@ -1676,10 +1767,10 @@ function promptCreateRoom() {
 
 function promptJoinInvite() {
     showPromptModal({
-        title: 'Join a Server',
-        desc: 'Enter an invite link or code:',
-        placeholder: 'e.g. vc-abc12345',
-        confirmText: 'Join Server',
+        title: t('join_server_title', 'Join a Server'),
+        desc: t('join_server_desc', 'Enter an invite link or code:'),
+        placeholder: t('join_server_placeholder', 'e.g. vc-abc12345'),
+        confirmText: t('join_server_btn', 'Join Server'),
         showChannelType: false,
         onConfirm: (code) => {
             const cleanCode = code.trim().replace(/^.*\/invite\//, '').replace(/^.*code=/, '');
@@ -1693,10 +1784,10 @@ function promptJoinInvite() {
 function promptCreateChannel() {
     if (!state.currentRoomId) return;
     showPromptModal({
-        title: 'Create Channel',
-        desc: 'Enter channel name and select type:',
+        title: t('create_channel_title', 'Create Channel'),
+        desc: t('create_channel_desc', 'Enter channel name and select type:'),
         placeholder: 'e.g. general',
-        confirmText: 'Create Channel',
+        confirmText: t('create_channel_btn', 'Create Channel'),
         showChannelType: true,
         onConfirm: (name, channelType) => {
             if (name && name.trim()) {
@@ -1713,12 +1804,13 @@ function promptServerInvite() {
 
 // ---------------- Server & Room Structure Events ----------------
 
-function onRoomCreated(room) {
+function onRoomCreated(payload) {
+    const room = (payload && payload.room) ? payload.room : payload;
     if (!room || !room.room_id) return;
     state.rooms[room.room_id] = room;
     renderServerRail();
     switchMode('server', room.room_id);
-    showToast(`Server "${room.name}" created!`);
+    showToast(`${t('server_created', 'Server created!')}: "${room.name}"`);
 }
 
 function onRoomDeleted(payload) {
@@ -1910,6 +2002,72 @@ function clearAttachment() {
     document.getElementById('attachment-preview-strip').classList.add('hidden');
 }
 
+const messageAttachmentsCache = new Map();
+
+// ---------------- Local Message Cache (Instant 0ms Channel Switching) ----------------
+const localMessageCache = new Map();
+
+function getCacheKey(targetType, targetId) {
+    return `vc_cache_${targetType}_${targetId}`;
+}
+
+function loadCachedMessages(targetType, targetId) {
+    if (!targetId) return [];
+    const key = getCacheKey(targetType, targetId);
+    if (localMessageCache.has(key)) {
+        return localMessageCache.get(key);
+    }
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                localMessageCache.set(key, parsed);
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load cached messages:', e);
+    }
+    return [];
+}
+
+function saveCachedMessages(targetType, targetId, messages) {
+    if (!targetId || !Array.isArray(messages)) return;
+    const key = getCacheKey(targetType, targetId);
+    const recent = messages.slice(-100);
+    localMessageCache.set(key, recent);
+    try {
+        const storable = recent.map(m => {
+            if (m.file_data && m.file_data.length > 50000) {
+                return { ...m, file_data: '' };
+            }
+            return m;
+        });
+        localStorage.setItem(key, JSON.stringify(storable));
+    } catch (e) {
+        console.warn('Failed to persist cached messages to localStorage:', e);
+    }
+}
+
+function renderCachedMessages(targetType, targetId) {
+    const list = document.getElementById('chat-messages-list');
+    list.innerHTML = '';
+    const cached = loadCachedMessages(targetType, targetId);
+    if (cached && cached.length > 0) {
+        const frag = document.createDocumentFragment();
+        cached.forEach(m => {
+            if (m.file_data) {
+                messageAttachmentsCache.set(m.msg_id, { name: m.file_name, data: m.file_data });
+            }
+            const row = createChatMessageElement(m);
+            if (row) frag.appendChild(row);
+        });
+        list.appendChild(frag);
+        scrollToBottom();
+    }
+}
+
 function sendMessage() {
     const input = document.getElementById('chat-text-input');
     const text = input.value.trim();
@@ -1918,6 +2076,8 @@ function sendMessage() {
     const targetType = state.currentDmPeerId ? 'dm' : 'channel';
     const targetId = state.currentDmPeerId || state.currentChannelId;
     if (!targetId) return;
+
+    const clientMsgId = `m-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
     let imgData = "";
     let fileData = "";
@@ -1934,8 +2094,12 @@ function sendMessage() {
         }
     }
 
+    if (fileData) {
+        messageAttachmentsCache.set(clientMsgId, { name: fileName, data: fileData });
+    }
+
     const localMsg = {
-        msg_id: `temp-${Date.now()}`,
+        msg_id: clientMsgId,
         sender_id: state.user?.user_id,
         sender_name: state.user?.display_name || state.user?.username,
         target_type: targetType,
@@ -1953,39 +2117,97 @@ function sendMessage() {
     input.value = '';
     clearAttachment();
 
+    const cached = loadCachedMessages(targetType, targetId);
+    if (!cached.some(m => m.msg_id === localMsg.msg_id)) {
+        cached.push(localMsg);
+        saveCachedMessages(targetType, targetId, cached);
+    }
+
     window.pywebview.api.send_chat_message(
         targetType, targetId, text,
         imgData, '', 0.0,
-        fileData, fileName, fileSize
+        fileData, fileName, fileSize,
+        clientMsgId
     );
 }
 
-function onChatMessageReceived(msg) {
-    const activeTargetId = state.currentDmPeerId || state.currentChannelId;
-    if (msg.target_id === activeTargetId || (msg.target_type === 'dm' && msg.sender_id === state.currentDmPeerId)) {
-        appendChatMessage(msg);
-    } else if (!state.dndMode && msg.sender_id !== state.user?.user_id) {
-        showToast(`New message from ${msg.sender_name || 'User'}`);
+// ---------------- Markdown Parser (Full Discord Standard) ----------------
+
+function formatMarkdown(text) {
+    if (!text) return '';
+
+    // 1. Extract multiline code blocks ```...```
+    const codeBlocks = [];
+    let processed = text.replace(/```(?:[a-zA-Z0-9_-]*\r?\n)?([\s\S]*?)```/g, (match, code) => {
+        const id = `§§VCCODEBLOCK${codeBlocks.length}§§`;
+        codeBlocks.push(`<pre class="chat-code-block"><code>${escapeHtml(code.trim())}</code></pre>`);
+        return id;
+    });
+
+    // 2. Extract inline code `...`
+    const inlineCodes = [];
+    processed = processed.replace(/`([^`\r\n]+)`/g, (match, code) => {
+        const id = `§§VCINLINECODE${inlineCodes.length}§§`;
+        inlineCodes.push(`<code class="chat-inline-code">${escapeHtml(code)}</code>`);
+        return id;
+    });
+
+    // 3. Escape HTML on text outside code blocks
+    processed = escapeHtml(processed);
+
+    // 4. Blockquotes (> ...)
+    processed = processed.replace(/^(&gt;|>)\s+(.*)$/gm, '<blockquote class="chat-blockquote">$2</blockquote>');
+
+    // 5. Spoilers ||...||
+    processed = processed.replace(/\|\|([\s\S]+?)\|\|/g, '<span class="chat-spoiler" onclick="this.classList.toggle(\'revealed\')">$1</span>');
+
+    // 6. Bold Italic (***text*** or ___text___)
+    processed = processed.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    processed = processed.replace(/___([\s\S]+?)___/g, '<u><em>$1</em></u>');
+
+    // 7. Bold (**text**)
+    processed = processed.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
+
+    // 8. Underline (__text__)
+    processed = processed.replace(/__([\s\S]+?)__/g, '<u>$1</u>');
+
+    // 9. Italic (*text* or _text_)
+    processed = processed.replace(/(?<!\*)\*([^*\r\n]+)\*(?!\*)/g, '<em>$1</em>');
+    processed = processed.replace(/(?<!_)_([^_\r\n]+)_(?!_)/g, '<em>$1</em>');
+
+    // 10. Strikethrough (~~text~~)
+    processed = processed.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
+
+    // 11. Markdown links [text](url) and auto-link URLs
+    processed = processed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s<]+)\)/g, '<a href="$2" class="chat-link" target="_blank" rel="noopener noreferrer">$1</a>');
+    processed = processed.replace(/(?<!href=")(https?:\/\/[^\s<]+)/g, '<a href="$1" class="chat-link" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    // 12. Convert newlines to <br>
+    processed = processed.replace(/\r?\n/g, '<br>');
+
+    // 13. Restore inline code and code blocks
+    inlineCodes.forEach((ic, idx) => {
+        processed = processed.replace(new RegExp(`§§VCINLINECODE${idx}§§`, 'g'), ic);
+    });
+    codeBlocks.forEach((cb, idx) => {
+        processed = processed.replace(new RegExp(`§§VCCODEBLOCK${idx}§§`, 'g'), cb);
+    });
+
+    return processed;
+}
+
+// ---------------- Chat Message Element Construction ----------------
+
+function onDownloadFileClick(msgId, defaultName) {
+    const cached = messageAttachmentsCache.get(msgId);
+    if (cached && cached.data) {
+        downloadFile(cached.name || defaultName, cached.data);
+    } else {
+        downloadFile(defaultName, '');
     }
 }
 
-function onHistoryReceived(data) {
-    const list = document.getElementById('chat-messages-list');
-    list.innerHTML = '';
-    (data.messages || []).forEach(m => appendChatMessage(m, false));
-    scrollToBottom();
-}
-
-function onMessageDeleted(data) {
-    const el = document.getElementById(`msg-${data.msg_id}`);
-    if (el) el.remove();
-}
-
-function appendChatMessage(msg, autoScroll = true) {
-    const list = document.getElementById('chat-messages-list');
-    const existing = document.getElementById(`msg-${msg.msg_id}`);
-    if (existing) return;
-
+function createChatMessageElement(msg) {
     const row = document.createElement('div');
     row.className = 'chat-message-row';
     row.id = `msg-${msg.msg_id}`;
@@ -2004,9 +2226,12 @@ function appendChatMessage(msg, autoScroll = true) {
     if (msg.image_data) {
         mediaHtml += `<div class="msg-image-wrap"><img src="data:image/png;base64,${msg.image_data}" class="msg-image" alt="Image" onclick="openLightbox(this.src)"></div>`;
     }
-    if (msg.file_data) {
+    if (msg.file_data || msg.file_name) {
+        if (msg.file_data) {
+            messageAttachmentsCache.set(msg.msg_id, { name: msg.file_name, data: msg.file_data });
+        }
         mediaHtml += `
-            <div class="msg-file-card" onclick="downloadFile('${escapeHtml(msg.file_name)}', '${msg.file_data}')">
+            <div class="msg-file-card" onclick="onDownloadFileClick('${msg.msg_id}', '${escapeHtml(msg.file_name)}')">
                 <span class="material-symbols-outlined" style="font-size: 28px; color: var(--accent);">description</span>
                 <div class="file-card-info">
                     <div class="file-name">${escapeHtml(msg.file_name)}</div>
@@ -2047,11 +2272,114 @@ function appendChatMessage(msg, autoScroll = true) {
                 <span class="msg-time">${timeStr}</span>
                 ${deleteHtml}
             </div>
-            ${msg.content ? `<div class="msg-text">${escapeHtml(msg.content)}</div>` : ''}
+            ${msg.content ? `<div class="msg-text">${formatMarkdown(msg.content)}</div>` : ''}
             ${mediaHtml}
         </div>
     `;
 
+    // Right-click context menu on message
+    row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showCustomContextMenu(e, msg);
+    });
+
+    return row;
+}
+
+function onChatMessageReceived(msg) {
+    const targetType = msg.target_type || (msg.target_id && msg.target_id.startsWith('ch-') ? 'channel' : 'dm');
+    const targetId = (msg.target_type === 'dm' && msg.sender_id !== state.user?.user_id) ? msg.sender_id : msg.target_id;
+
+    // Cache incoming message
+    if (targetId) {
+        const cached = loadCachedMessages(targetType, targetId);
+        if (!cached.some(m => m.msg_id === msg.msg_id)) {
+            cached.push(msg);
+            saveCachedMessages(targetType, targetId, cached);
+        }
+    }
+
+    const activeTargetId = state.currentDmPeerId || state.currentChannelId;
+    const isRelevant = msg.target_id === activeTargetId ||
+                       (msg.target_type === 'dm' && (msg.sender_id === state.currentDmPeerId || msg.target_id === state.currentDmPeerId));
+
+    if (isRelevant) {
+        // If message already rendered (via client optimistic update or duplicate event), do not duplicate!
+        const existing = document.getElementById(`msg-${msg.msg_id}`);
+        if (existing) {
+            return;
+        }
+        appendChatMessage(msg);
+    } 
+
+    if (msg.sender_id !== state.user?.user_id) {
+        let isMention = false;
+        if (state.user && state.user.username) {
+            isMention = (msg.content || "").includes(`@${state.user.username}`);
+        }
+        let isDm = msg.target_type === 'dm';
+        
+        if (!state.dndMode && (!isRelevant || !document.hasFocus())) {
+            if (isDm) {
+                showToast(`New DM from @${msg.sender_name || 'User'}`);
+                triggerNativeNotification(`DM from @${msg.sender_name || 'User'}`, msg.content);
+            } else if (isMention) {
+                showToast(`@${msg.sender_name || 'User'} mentioned you`);
+                triggerNativeNotification(`Mention from @${msg.sender_name || 'User'}`, msg.content);
+            }
+        }
+    }
+}
+
+function onHistoryReceived(data) {
+    const targetType = data.target_type || (data.target_id && data.target_id.startsWith('ch-') ? 'channel' : 'dm');
+    const targetId = data.target_id;
+    const msgs = data.messages || [];
+
+    // Save authoritative server history to cache
+    if (targetId) {
+        saveCachedMessages(targetType, targetId, msgs);
+    }
+
+    const activeTargetId = state.currentDmPeerId || state.currentChannelId;
+    if (targetId && targetId !== activeTargetId) {
+        return;
+    }
+
+    const list = document.getElementById('chat-messages-list');
+    list.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    msgs.forEach(m => {
+        if (m.file_data) {
+            messageAttachmentsCache.set(m.msg_id, { name: m.file_name, data: m.file_data });
+        }
+        const row = createChatMessageElement(m);
+        if (row) frag.appendChild(row);
+    });
+    list.appendChild(frag);
+    scrollToBottom();
+}
+
+function onMessageDeleted(data) {
+    const el = document.getElementById(`msg-${data.msg_id}`);
+    if (el) el.remove();
+
+    const activeTargetId = state.currentDmPeerId || state.currentChannelId;
+    const targetType = state.currentDmPeerId ? 'dm' : 'channel';
+    if (activeTargetId) {
+        let cached = loadCachedMessages(targetType, activeTargetId);
+        cached = cached.filter(m => m.msg_id !== data.msg_id);
+        saveCachedMessages(targetType, activeTargetId, cached);
+    }
+}
+
+function appendChatMessage(msg, autoScroll = true) {
+    const list = document.getElementById('chat-messages-list');
+    const existing = document.getElementById(`msg-${msg.msg_id}`);
+    if (existing) return;
+
+    const row = createChatMessageElement(msg);
     list.appendChild(row);
     if (autoScroll) scrollToBottom();
 }
@@ -2061,6 +2389,145 @@ function scrollToBottom() {
     if (container) {
         container.scrollTop = container.scrollHeight;
     }
+}
+
+// ---------------- Custom Discord Context Menu ----------------
+
+let currentContextMenuMsg = null;
+
+function setupCustomContextMenu() {
+    const menu = document.getElementById('custom-context-menu');
+    if (!menu) return;
+
+    // Suppress browser default context menu across the app except for inputs
+    document.addEventListener('contextmenu', (e) => {
+        const targetImg = e.target.closest('.msg-image');
+        const targetRow = e.target.closest('.chat-message-row');
+        const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+        if (!targetRow && !targetImg && !isInput) {
+            e.preventDefault();
+            hideCustomContextMenu();
+        }
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target)) {
+            hideCustomContextMenu();
+        }
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideCustomContextMenu();
+        }
+    });
+
+    // Menu Actions
+    document.getElementById('ctx-copy-text').onclick = () => {
+        if (currentContextMenuMsg && currentContextMenuMsg.content) {
+            navigator.clipboard.writeText(currentContextMenuMsg.content);
+            showToast(t('text_copied', 'Text copied to clipboard'));
+        }
+        hideCustomContextMenu();
+    };
+
+    document.getElementById('ctx-open-image').onclick = () => {
+        if (currentContextMenuMsg && currentContextMenuMsg.image_data) {
+            openLightbox(`data:image/png;base64,${currentContextMenuMsg.image_data}`);
+        }
+        hideCustomContextMenu();
+    };
+
+    document.getElementById('ctx-copy-image').onclick = async () => {
+        if (currentContextMenuMsg && currentContextMenuMsg.image_data) {
+            try {
+                const res = await fetch(`data:image/png;base64,${currentContextMenuMsg.image_data}`);
+                const blob = await res.blob();
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                showToast(t('image_copied', 'Image copied to clipboard'));
+            } catch (err) {
+                console.error('Copy image failed:', err);
+                showToast(t('copy_failed', 'Failed to copy image'));
+            }
+        }
+        hideCustomContextMenu();
+    };
+
+    document.getElementById('ctx-save-image').onclick = () => {
+        if (currentContextMenuMsg && currentContextMenuMsg.image_data) {
+            downloadFile(`vimcord_${Date.now()}.png`, currentContextMenuMsg.image_data);
+        }
+        hideCustomContextMenu();
+    };
+
+    document.getElementById('ctx-copy-id').onclick = () => {
+        if (currentContextMenuMsg && currentContextMenuMsg.msg_id) {
+            navigator.clipboard.writeText(currentContextMenuMsg.msg_id);
+            showToast(t('id_copied', 'Message ID copied'));
+        }
+        hideCustomContextMenu();
+    };
+
+    document.getElementById('ctx-delete-msg').onclick = () => {
+        if (currentContextMenuMsg) {
+            deleteMessage(currentContextMenuMsg.msg_id, currentContextMenuMsg.target_type, currentContextMenuMsg.target_id);
+        }
+        hideCustomContextMenu();
+    };
+}
+
+function showCustomContextMenu(e, msg) {
+    const menu = document.getElementById('custom-context-menu');
+    if (!menu) return;
+
+    currentContextMenuMsg = msg;
+
+    const copyTextBtn = document.getElementById('ctx-copy-text');
+    const openImgBtn = document.getElementById('ctx-open-image');
+    const copyImgBtn = document.getElementById('ctx-copy-image');
+    const saveImgBtn = document.getElementById('ctx-save-image');
+    const copyIdBtn = document.getElementById('ctx-copy-id');
+    const deleteBtn = document.getElementById('ctx-delete-msg');
+    const divider = document.getElementById('ctx-divider-msg');
+
+    const hasText = Boolean(msg && msg.content);
+    const hasImage = Boolean(msg && msg.image_data);
+    const isMine = Boolean(msg && msg.sender_id === state.user?.user_id);
+
+    copyTextBtn.style.display = hasText ? 'flex' : 'none';
+    openImgBtn.style.display = hasImage ? 'flex' : 'none';
+    copyImgBtn.style.display = hasImage ? 'flex' : 'none';
+    saveImgBtn.style.display = hasImage ? 'flex' : 'none';
+    copyIdBtn.style.display = msg ? 'flex' : 'none';
+    deleteBtn.style.display = isMine ? 'flex' : 'none';
+    if (divider) divider.style.display = (msg && (hasText || hasImage)) ? 'block' : 'none';
+
+    menu.classList.remove('hidden');
+
+    const menuW = 210;
+    const menuH = 220;
+    let x = e.clientX;
+    let y = e.clientY;
+
+    if (x + menuW > window.innerWidth) {
+        x = window.innerWidth - menuW - 10;
+    }
+    if (y + menuH > window.innerHeight) {
+        y = window.innerHeight - menuH - 10;
+    }
+
+    menu.style.left = `${Math.max(10, x)}px`;
+    menu.style.top = `${Math.max(10, y)}px`;
+}
+
+function hideCustomContextMenu() {
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.classList.add('hidden');
+    currentContextMenuMsg = null;
 }
 
 function deleteMessage(msgId, targetType, targetId) {
@@ -2080,7 +2547,15 @@ async function downloadFile(name, b64) {
 }
 
 function playVoiceMsg(b64, dur) {
-    window.pywebview.api.play_voice_message(b64, dur);
+    if (!b64) return;
+    try {
+        const audio = new Audio(`data:audio/wav;base64,${b64}`);
+        audio.play().catch(() => {
+            window.pywebview?.api?.play_voice_message(b64, dur);
+        });
+    } catch (e) {
+        window.pywebview?.api?.play_voice_message(b64, dur);
+    }
 }
 
 // ---------------- Voice Message Recording ----------------
@@ -2120,6 +2595,11 @@ function onIncomingCall(data) {
     document.getElementById('incoming-caller-name').textContent = data.from_username;
     document.getElementById('incoming-caller-avatar').textContent = data.from_username.charAt(0).toUpperCase();
     document.getElementById('modal-incoming-call').classList.remove('hidden');
+
+    if (!state.dndMode) {
+        showToast(`Incoming call from @${data.from_username}`);
+        triggerNativeNotification("Incoming Call", `@${data.from_username} is calling you.`);
+    }
 }
 
 function acceptIncomingCall() {
@@ -2232,8 +2712,19 @@ function onLocalSpeaking(data) {
     updateUserSpeakingState(state.user.user_id, data.is_speaking);
 }
 
+const peerSpeakingTimeouts = new Map();
+
 function onPeerSpeaking(data) {
     updateUserSpeakingState(data.user_id, data.is_speaking);
+    if (data.is_speaking) {
+        if (peerSpeakingTimeouts.has(data.user_id)) {
+            clearTimeout(peerSpeakingTimeouts.get(data.user_id));
+        }
+        peerSpeakingTimeouts.set(data.user_id, setTimeout(() => {
+            updateUserSpeakingState(data.user_id, false);
+            peerSpeakingTimeouts.delete(data.user_id);
+        }, 350));
+    }
 }
 
 function updateUserSpeakingState(userId, isSpeaking) {
@@ -2411,6 +2902,16 @@ function toggleDeafen() {
 
 function openSettings() {
     document.getElementById('modal-settings').classList.remove('hidden');
+
+    // Dynamically refresh audio input & output devices
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_audio_devices === 'function') {
+        window.pywebview.api.get_audio_devices().then(devs => {
+            if (devs) {
+                populateAudioDevices(devs, state.config?.input_device, state.config?.output_device);
+            }
+        }).catch(err => console.warn('[Audio] Failed to get audio devices:', err));
+    }
+
     if (!state.user) return;
 
     // Load initial settings drafts
@@ -2675,6 +3176,22 @@ function applyLanguage(lng) {
             el.textContent = I18N[lng][key];
         }
     });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.dataset.i18nPlaceholder;
+        if (I18N[lng] && I18N[lng][key]) {
+            el.placeholder = I18N[lng][key];
+        }
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle;
+        if (I18N[lng] && I18N[lng][key]) {
+            el.title = I18N[lng][key];
+        }
+    });
+    if (state.activeTab === 'home') {
+        const sbTitle = document.getElementById('sidebar-title');
+        if (sbTitle) sbTitle.textContent = t('direct_messages', 'Direct Messages');
+    }
 }
 
 function populateAudioDevices(devs, savedInput = null, savedOutput = null) {
@@ -2685,7 +3202,13 @@ function populateAudioDevices(devs, savedInput = null, savedOutput = null) {
     inSel.innerHTML = '<option value="">Default System Microphone</option>';
     outSel.innerHTML = '<option value="">Default System Speakers</option>';
 
-    (devs.inputs || []).forEach(d => {
+    const inputList = devs?.inputs || (Array.isArray(devs?.input) ? devs.input.map((n, i) => ({ id: i, name: n })) : []);
+    const outputList = devs?.outputs || (Array.isArray(devs?.output) ? devs.output.map((n, i) => ({ id: i, name: n })) : []);
+
+    const seenIn = new Set();
+    inputList.forEach(d => {
+        if (seenIn.has(d.name)) return;
+        seenIn.add(d.name);
         const opt = document.createElement('option');
         opt.value = d.id;
         opt.textContent = d.name;
@@ -2695,7 +3218,10 @@ function populateAudioDevices(devs, savedInput = null, savedOutput = null) {
         inSel.appendChild(opt);
     });
 
-    (devs.outputs || []).forEach(d => {
+    const seenOut = new Set();
+    outputList.forEach(d => {
+        if (seenOut.has(d.name)) return;
+        seenOut.add(d.name);
         const opt = document.createElement('option');
         opt.value = d.id;
         opt.textContent = d.name;
@@ -2704,6 +3230,29 @@ function populateAudioDevices(devs, savedInput = null, savedOutput = null) {
         }
         outSel.appendChild(opt);
     });
+
+    if (inputList.length === 0 && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        navigator.mediaDevices.enumerateDevices().then(devices => {
+            devices.forEach((d, idx) => {
+                const label = d.label || (d.kind === 'audioinput' ? `Microphone ${idx + 1}` : `Speakers ${idx + 1}`);
+                if (d.kind === 'audioinput') {
+                    if (seenIn.has(label)) return;
+                    seenIn.add(label);
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId || idx;
+                    opt.textContent = label;
+                    inSel.appendChild(opt);
+                } else if (d.kind === 'audiooutput') {
+                    if (seenOut.has(label)) return;
+                    seenOut.add(label);
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId || idx;
+                    opt.textContent = label;
+                    outSel.appendChild(opt);
+                }
+            });
+        }).catch(() => {});
+    }
 }
 
 // ---------------- Friends Tab Logic ----------------
@@ -2860,9 +3409,21 @@ function onUserPresence(user) {
 }
 
 function onPong(data) {
-    const el = document.getElementById('voice-status-channel');
-    if (el && state.currentVoiceChannelId) {
-        el.textContent = `Connected / ${data.ping_ms}ms`;
+    state.lastPingMs = data.ping_ms;
+    const bar = document.getElementById('voice-status-bar');
+    if (bar && state.currentVoiceChannelId) {
+        bar.classList.add('connected');
+        const titleEl = bar.querySelector('.voice-status-title');
+        if (titleEl) {
+            titleEl.textContent = t('voice_connected') || 'Voice Connected';
+        }
+        const chName = state.currentVoiceChannelName || 'General';
+        const el = document.getElementById('voice-status-channel');
+        if (el) el.textContent = `${chName} / ${data.ping_ms} ms`;
+    }
+    const desc = document.getElementById('channel-header-desc');
+    if (desc && !document.getElementById('view-voice-stage').classList.contains('hidden')) {
+        desc.textContent = `Voice Channel - RTC Connected (${data.ping_ms} ms)`;
     }
 }
 
@@ -2883,6 +3444,34 @@ function showToast(text) {
         toast.style.animation = 'fadeOut 0.3s forwards';
         setTimeout(() => toast.remove(), 300);
     }, 3200);
+}
+
+function triggerNativeNotification(title, body) {
+    if (window.__TAURI__ && window.__TAURI__.notification) {
+        const { isPermissionGranted, requestPermission, sendNotification } = window.__TAURI__.notification;
+        isPermissionGranted().then(granted => {
+            if (!granted) {
+                requestPermission().then(perm => {
+                    if (perm === 'granted') {
+                        sendNotification({ title: title, body: body });
+                    }
+                });
+            } else {
+                sendNotification({ title: title, body: body });
+            }
+        }).catch(err => console.warn('Native notification error:', err));
+    } else if (window.Notification) {
+        // Fallback to HTML5 Notifications if running in normal browser context
+        if (Notification.permission === 'granted') {
+            new Notification(title, { body });
+        } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    new Notification(title, { body });
+                }
+            });
+        }
+    }
 }
 
 function formatBytes(bytes) {

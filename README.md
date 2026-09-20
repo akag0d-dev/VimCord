@@ -100,35 +100,51 @@ sudo ufw allow 9989/udp
 sudo ufw reload
 ```
 
-### Шаг 3. Запуск службы в фоне (systemd)
-Создайте файл службы:
+### Шаг 3. Сборка и запуск Rust сервера в фоне (systemd)
+
+1. **Соберите сервер на VPS** (требуется Rust / cargo):
+```bash
+cd /root/VimCord/server-rust
+cargo build --release
+```
+*(Бинарник будет расположен в `/root/VimCord/server-rust/target/release/vimcord-server`)*
+
+2. **Создайте или обновите файл службы systemd**:
 ```bash
 sudo nano /etc/systemd/system/vimcord.service
 ```
 
-Вставьте следующее содержимое:
+Вставьте следующее содержимое (прямой запуск высокопроизводительного Rust бинарника):
 ```ini
 [Unit]
-Description=VimCord Server
+Description=VimCord Rust Server
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/VimCord
-ExecStart=/usr/bin/python3 /root/VimCord/run_server.py --host 0.0.0.0 --tcp-port 9988 --udp-port 9989
+ExecStart=/root/VimCord/server-rust/target/release/vimcord-server --host 0.0.0.0 --tcp-port 9988 --udp-port 9989 --db /root/VimCord/vimcord_data.db
 Restart=always
-RestartSec=5
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Активируйте и запустите службу:
+> **Примечание:** Если ваш `vimcord.service` по-прежнему настроен на `/usr/bin/python3 /root/VimCord/run_server.py`, скрипт `run_server.py` автоматически обнаружит собранный бинарник `vimcord-server` и прозрачно запустит его!
+
+3. **Перезапустите службу**:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable vimcord
-sudo systemctl start vimcord
+sudo systemctl restart vimcord
+```
+
+4. **Проверка статуса и логов**:
+```bash
+sudo systemctl status vimcord
+sudo journalctl -u vimcord -f
 ```
 
 ---

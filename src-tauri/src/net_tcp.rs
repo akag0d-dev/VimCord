@@ -3,7 +3,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 pub struct TcpClient {
     write_tx: Option<mpsc::UnboundedSender<String>>,
@@ -116,6 +116,36 @@ impl TcpClient {
             "login_resp" | "login_response" => {
                 let ok = val.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
                 if ok {
+                    if let Some(uid) = val.get("user_id").and_then(|v| v.as_str()) {
+                        if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                            if let Ok(mut lock) = st.my_user_id.try_lock() {
+                                *lock = uid.to_string();
+                            }
+                            let udp_arc = st.udp.clone();
+                            let audio_arc = st.audio.clone();
+                            let app_cl = app.clone();
+                            let uid_cl = uid.to_string();
+                            tokio::spawn(async move {
+                                let cfg = crate::config::load_config();
+                                let host = if !cfg.host.trim().is_empty() { cfg.host } else { crate::protocol::DEFAULT_HOST.to_string() };
+                                let udp_port = if cfg.udp_port > 0 { cfg.udp_port } else { crate::protocol::DEFAULT_UDP_PORT };
+
+                                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u8, String, Vec<u8>)>();
+                                audio_arc.set_udp_sender(Some(tx));
+
+                                let udp_for_rx = udp_arc.clone();
+                                tokio::spawn(async move {
+                                    while let Some((pkt_type, target_id, payload)) = rx.recv().await {
+                                        udp_for_rx.lock().await.send_packet(pkt_type, &target_id, &payload).await;
+                                    }
+                                });
+
+                                if let Err(e) = udp_arc.lock().await.start(uid_cl, host, udp_port, app_cl).await {
+                                    log::error!("Failed to start UDP voice client on login: {}", e);
+                                }
+                            });
+                        }
+                    }
                     if let Some(w) = app.get_webview_window("main") {
                         let _ = w.set_size(tauri::LogicalSize::new(1280.0, 800.0));
                         let _ = w.center();
@@ -147,7 +177,8 @@ impl TcpClient {
                 dispatch_event(app, "user_presence", val);
             }
             "room_created" => {
-                dispatch_event(app, "room_created", val);
+                let room_obj = val.get("room").cloned().unwrap_or_else(|| val.clone());
+                dispatch_event(app, "room_created", room_obj);
             }
             "room_deleted" => {
                 let rid = val.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -219,6 +250,10 @@ impl TcpClient {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                 let pid = val.get("peer_id").and_then(|v| v.as_str()).unwrap_or("");
                 let pname = val.get("peer_name").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                    st.audio.set_voice_target(Some((crate::protocol::UDP_TYPE_DM_AUDIO, cid.to_string())));
+                    st.audio.ensure_capture_and_playback(app);
+                }
                 dispatch_event(app, "call_accepted", serde_json::json!({
                     "call_id": cid,
                     "peer_id": pid,
@@ -227,18 +262,27 @@ impl TcpClient {
             }
             "call_declined" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                    st.audio.set_voice_target(None);
+                }
                 dispatch_event(app, "call_declined", serde_json::json!({
                     "call_id": cid
                 }));
             }
             "call_ended" => {
                 let cid = val.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                    st.audio.set_voice_target(None);
+                }
                 dispatch_event(app, "call_ended", serde_json::json!({
                     "call_id": cid
                 }));
             }
             "call_failed" => {
                 let r = val.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(st) = app.try_state::<crate::commands::AppState>() {
+                    st.audio.set_voice_target(None);
+                }
                 dispatch_event(app, "call_failed", serde_json::json!({
                     "reason": r
                 }));
@@ -319,10 +363,6 @@ impl TcpClient {
 }
 
 pub fn dispatch_event(app: &AppHandle, event_name: &str, payload: Value) {
-    let _ = app.emit("vimcord://event", serde_json::json!({
-        "event": event_name,
-        "payload": &payload
-    }));
     if let Some(w) = app.get_webview_window("main") {
         if let (Ok(evt_json), Ok(payload_json)) = (serde_json::to_string(event_name), serde_json::to_string(&payload)) {
             let js = format!(

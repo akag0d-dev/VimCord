@@ -11,6 +11,7 @@ use tauri::{tray::TrayIconBuilder, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::new())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -81,8 +82,10 @@ pub fn run() {
             commands::create_room_invite,
             commands::join_room_by_invite,
             commands::get_room_members,
+            commands::get_audio_devices,
             commands::set_audio_devices,
             commands::set_ptt_config,
+            commands::set_noise_suppression,
             commands::set_stream_settings,
             commands::start_mic_test,
             commands::stop_mic_test,

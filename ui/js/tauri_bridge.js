@@ -75,7 +75,8 @@
                             voiceDuration: args[5] || 0.0,
                             fileData: args[6] || "",
                             fileName: args[7] || "",
-                            fileSize: args[8] || 0
+                            fileSize: args[8] || 0,
+                            client_msg_id: args[9] || null
                         });
                     } else if (cmd === 'delete_message') {
                         return invoke('delete_message', {
@@ -126,11 +127,11 @@
                         });
                     } else if (cmd === 'set_mic_volume') {
                         return invoke('set_mic_volume', {
-                            volume: Number(args[0]) / 100.0
+                            volume: Number(args[0])
                         });
                     } else if (cmd === 'set_output_volume') {
                         return invoke('set_output_volume', {
-                            volume: Number(args[0]) / 100.0
+                            volume: Number(args[0])
                         });
                     } else if (cmd === 'set_vad_threshold') {
                         return invoke('set_vad_threshold', {
@@ -239,6 +240,8 @@
                             fps: Number(args[1]) || 30,
                             quality: Number(args[2]) || 45
                         });
+                    } else if (cmd === 'get_audio_devices') {
+                        return invoke('get_audio_devices', {});
                     } else if (cmd === 'start_mic_test') {
                         return invoke('start_mic_test', {});
                     } else if (cmd === 'stop_mic_test') {
@@ -278,20 +281,6 @@
             }
         })
     };
-
-    // Listen for backend events dispatched over Tauri event bus if available
-    try {
-        if (window.__TAURI__ && window.__TAURI__.event && typeof window.__TAURI__.event.listen === 'function') {
-            window.__TAURI__.event.listen('vimcord://event', (event) => {
-                const data = event.payload;
-                if (data && data.event) {
-                    window.dispatchVimCordEvent(data.event, data.payload);
-                }
-            });
-        }
-    } catch (e) {
-        console.warn("[VimCord Bridge] Could not attach Tauri event listener:", e);
-    }
 
     // Trigger pywebviewready event so app.js initializes automatically
     function triggerReady() {

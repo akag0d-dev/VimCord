@@ -65,18 +65,15 @@
                 </div>
                 <!-- Server Options Dropdown Menu -->
                 <div id="server-options-popup" class="options-popup hidden">
-                    <button class="options-popup-item" id="menu-opt-create-channel">
-                        <span class="material-symbols-outlined">add_circle</span> Create Channel
+                    <button class="options-popup-item" id="menu-opt-copy-server-id">
+                        <span class="material-symbols-outlined">fingerprint</span> <span data-i18n="copy_server_id">Copy Server ID</span>
                     </button>
-                    <button class="options-popup-item" id="menu-opt-invite">
-                        <span class="material-symbols-outlined">person_add</span> Invite People
-                    </button>
-                    <div class="options-popup-divider"></div>
+                    <div class="options-popup-divider" id="menu-opt-server-divider"></div>
                     <button class="options-popup-item item-danger hidden" id="menu-opt-delete-server">
-                        <span class="material-symbols-outlined">delete</span> Delete Server
+                        <span class="material-symbols-outlined">delete</span> <span data-i18n="delete_server">Delete Server</span>
                     </button>
                     <button class="options-popup-item item-danger hidden" id="menu-opt-leave-server">
-                        <span class="material-symbols-outlined">logout</span> Leave Server
+                        <span class="material-symbols-outlined">logout</span> <span data-i18n="leave_server">Leave Server</span>
                     </button>
                 </div>
             </div>
@@ -107,8 +104,8 @@
                 <div class="voice-status-left">
                     <span class="material-symbols-outlined voice-status-icon">signal_cellular_alt</span>
                     <div class="voice-status-info">
-                        <div class="voice-status-title" data-i18n="voice_connected">Voice Connected</div>
-                        <div id="voice-status-channel" class="voice-status-sub">General / RTC Connecting</div>
+                        <div class="voice-status-title">RTC Connecting...</div>
+                        <div id="voice-status-channel" class="voice-status-sub">Connecting...</div>
                     </div>
                 </div>
                 <div class="voice-status-actions">
@@ -261,6 +258,9 @@
                             <button id="btn-voice-msg" class="composer-action-btn voice-record-btn" title="Hold/Click to record voice message">
                                 <span class="material-symbols-outlined">mic</span>
                             </button>
+                            <button id="btn-send-message" class="composer-send-btn" title="Send (Enter)">
+                                <span class="material-symbols-outlined">send</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -351,10 +351,10 @@
             </div>
             <div class="settings-content">
                 <div class="settings-close-wrap">
-                    <button class="settings-close-btn" id="btn-close-settings" title="Close Settings">
+                    <button class="settings-close-btn" id="btn-close-settings" title="Close Settings (ESC)">
                         <span class="material-symbols-outlined">close</span>
-                        <span>ESC</span>
                     </button>
+                    <span class="esc-hint">ESC</span>
                 </div>
 
                 <!-- Account Settings Page -->
@@ -422,12 +422,14 @@
 
                     <div class="settings-separator"></div>
 
-                    <h3>CHANGE PASSWORD</h3>
-                    <div class="input-row" style="margin-top: 10px;">
-                        <input type="password" id="input-old-pass" placeholder="Current Password">
-                        <input type="password" id="input-new-pass" placeholder="New Password (min 4 characters)">
+                    <div class="settings-section">
+                        <label data-i18n="change_password">CHANGE PASSWORD</label>
+                        <div class="input-row" style="margin-top: 10px;">
+                            <input type="password" id="input-old-pass" placeholder="Current Password" data-i18n-placeholder="current_password">
+                            <input type="password" id="input-new-pass" placeholder="New Password (min 4 characters)" data-i18n-placeholder="new_password">
+                        </div>
+                        <button type="button" class="btn-secondary" id="btn-save-password" style="margin-top: 10px;" data-i18n="update_password">Update Password</button>
                     </div>
-                    <button type="button" class="btn-secondary" id="btn-save-password" style="margin-top: 8px;">Update Password</button>
                 </div>
 
                 <!-- Voice & Video Settings Page -->
@@ -483,20 +485,10 @@
                             <label>VOICE SENSITIVITY (VAD THRESHOLD)</label>
                             <span id="label-vad-thresh" class="slider-val-tag">0.015</span>
                         </div>
-                        <input type="range" id="slider-vad-thresh" min="2" max="50" value="15" class="custom-slider">
+                        <input type="range" id="slider-vad-thresh" min="1" max="200" value="15" class="custom-slider">
                     </div>
 
                     <div class="settings-section hidden" id="ptt-keybind-container">
-                        <label>SHORTCUT (KEYBIND)</label>
-                        <div class="keybind-recorder-box">
-                            <div id="ptt-key-display" class="key-badge">Space</div>
-                            <button type="button" id="btn-record-keybind" class="btn-secondary" data-i18n="record_keybind">Record Keybind</button>
-                            <select id="select-ptt-preset" class="settings-select" style="max-width: 130px;">
-                                <option value="Space">Space</option>
-                                <option value="V">V</option>
-                                <option value="B">B</option>
-                                <option value="C">C</option>
-                                <option value="X">X</option>
                                 <option value="Caps Lock">Caps Lock</option>
                                 <option value="Shift">Shift</option>
                                 <option value="Control">Control</option>
@@ -507,6 +499,16 @@
                             </select>
                         </div>
                         <p class="settings-hint">Global hotkey works in all full-screen games, in any keyboard layout, and supports Mouse 3, 4, 5!</p>
+                    </div>
+
+                    <div class="settings-section">
+                        <label class="checkbox-row" style="margin-top: 10px;">
+                            <input type="checkbox" id="settings-noise-suppression">
+                            <span style="font-weight: 500; font-size: 14px;">Enable AI Noise Suppression</span>
+                        </label>
+                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px; margin-left: 28px;">
+                            Suppresses background noise like keyboard clicks and fans using nnnoiseless.
+                        </div>
                     </div>
 
                     <div class="settings-section">
@@ -682,15 +684,15 @@
             <p id="prompt-desc">Enter name:</p>
             <input type="text" id="prompt-input" style="width: 100%; margin: 12px 0;">
             <div id="prompt-channel-type-row" class="hidden" style="margin-bottom: 14px; text-align: left;">
-                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">CHANNEL TYPE</label>
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;" data-i18n="channel_type">CHANNEL TYPE</label>
                 <select id="prompt-channel-type" class="settings-select" style="width: 100%;">
-                    <option value="text">Text Channel</option>
-                    <option value="voice">Voice Channel</option>
+                    <option value="text" data-i18n="text_channel">Text Channel</option>
+                    <option value="voice" data-i18n="voice_channel">Voice Channel</option>
                 </select>
             </div>
             <div class="modal-actions">
-                <button id="btn-prompt-cancel" class="btn-secondary">Cancel</button>
-                <button id="btn-prompt-confirm" class="btn-primary">Create</button>
+                <button id="btn-prompt-cancel" class="btn-secondary" data-i18n="cancel">Cancel</button>
+                <button id="btn-prompt-confirm" class="btn-primary" data-i18n="confirm">Create</button>
             </div>
         </div>
     </div>
@@ -708,11 +710,11 @@
     <!-- 6. Custom Confirmation Dialog (Replaces native browser confirm()) -->
     <div id="modal-confirm" class="modal-overlay hidden">
         <div class="modal-card confirm-card">
-            <h3 id="confirm-title" class="confirm-title">Are you sure?</h3>
-            <p id="confirm-message" class="confirm-desc">Do you really want to perform this action? This cannot be undone.</p>
+            <h3 id="confirm-title" class="confirm-title" data-i18n="are_you_sure">Are you sure?</h3>
+            <p id="confirm-message" class="confirm-desc" data-i18n="confirm_action_desc">Do you really want to perform this action? This cannot be undone.</p>
             <div class="modal-actions confirm-actions">
-                <button id="btn-confirm-cancel" class="btn-secondary">Cancel</button>
-                <button id="btn-confirm-ok" class="btn-danger">Confirm</button>
+                <button id="btn-confirm-cancel" class="btn-secondary" data-i18n="cancel">Cancel</button>
+                <button id="btn-confirm-ok" class="btn-danger" data-i18n="confirm">Confirm</button>
             </div>
         </div>
     </div>
@@ -762,6 +764,35 @@
             <div class="connection-title" id="conn-overlay-title">Connection Lost</div>
             <div class="connection-status" id="conn-overlay-text">Reconnecting in 5s...</div>
             <button type="button" id="btn-reconnect-now" class="primary-btn connection-retry-btn">Reconnect Now</button>
+        </div>
+    </div>
+
+    <!-- Custom Discord-Styled Context Menu -->
+    <div id="custom-context-menu" class="custom-context-menu hidden">
+        <div class="context-menu-item" id="ctx-copy-text">
+            <span class="material-symbols-outlined">content_copy</span>
+            <span data-i18n="ctx_copy_text">Copy Text</span>
+        </div>
+        <div class="context-menu-item" id="ctx-open-image">
+            <span class="material-symbols-outlined">visibility</span>
+            <span data-i18n="ctx_open_image">Open Original</span>
+        </div>
+        <div class="context-menu-item" id="ctx-copy-image">
+            <span class="material-symbols-outlined">image</span>
+            <span data-i18n="ctx_copy_image">Copy Image</span>
+        </div>
+        <div class="context-menu-item" id="ctx-save-image">
+            <span class="material-symbols-outlined">download</span>
+            <span data-i18n="ctx_save_image">Save Image</span>
+        </div>
+        <div class="context-menu-divider" id="ctx-divider-msg"></div>
+        <div class="context-menu-item" id="ctx-copy-id">
+            <span class="material-symbols-outlined">fingerprint</span>
+            <span data-i18n="ctx_copy_id">Copy ID</span>
+        </div>
+        <div class="context-menu-item item-danger" id="ctx-delete-msg">
+            <span class="material-symbols-outlined">delete</span>
+            <span data-i18n="ctx_delete_msg">Delete Message</span>
         </div>
     </div>
 

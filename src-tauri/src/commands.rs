@@ -32,6 +32,12 @@ impl AppState {
 pub async fn get_initial_state(_state: State<'_, AppState>) -> Result<Value, String> {
     let cfg = load_config();
     let devices = AudioManager::get_devices();
+    if let Some(in_dev) = cfg.input_device {
+        _state.audio.set_selected_input(Some(in_dev));
+    }
+    if let Some(out_dev) = cfg.output_device {
+        _state.audio.set_selected_output(Some(out_dev));
+    }
 
     Ok(serde_json::json!({
         "config": cfg,
@@ -238,8 +244,12 @@ pub async fn send_chat_message(
     file_data: Option<String>,
     file_name: Option<String>,
     file_size: Option<u64>,
+    client_msg_id: Option<String>,
 ) -> Result<Value, String> {
-    let msg_id = format!("m-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let msg_id = match client_msg_id {
+        Some(ref id) if !id.trim().is_empty() => id.trim().to_string(),
+        _ => format!("m-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+    };
     let uid = state.my_user_id.lock().await.clone();
     let uname = state.my_username.lock().await.clone();
     let now = std::time::SystemTime::now()
@@ -365,6 +375,7 @@ pub async fn save_file_to_disk(filename: String, b64_data: String) -> Result<Val
 
 #[tauri::command]
 pub async fn join_voice(
+    app: AppHandle,
     state: State<'_, AppState>,
     room_id: String,
     channel_id: String,
@@ -374,6 +385,28 @@ pub async fn join_voice(
         "room_id": room_id,
         "channel_id": channel_id
     }));
+
+    let uid = state.my_user_id.lock().await.clone();
+    if !uid.is_empty() && !state.udp.lock().await.is_running() {
+        let cfg = load_config();
+        let host = if !cfg.host.trim().is_empty() { cfg.host } else { crate::protocol::DEFAULT_HOST.to_string() };
+        let udp_port = if cfg.udp_port > 0 { cfg.udp_port } else { crate::protocol::DEFAULT_UDP_PORT };
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u8, String, Vec<u8>)>();
+        state.audio.set_udp_sender(Some(tx));
+
+        let udp_cl = state.udp.clone();
+        tokio::spawn(async move {
+            while let Some((pkt_type, target_id, payload)) = rx.recv().await {
+                udp_cl.lock().await.send_packet(pkt_type, &target_id, &payload).await;
+            }
+        });
+
+        let _ = state.udp.lock().await.start(uid, host, udp_port, app.clone()).await;
+    }
+
+    state.audio.set_voice_target(Some((crate::protocol::UDP_TYPE_CHANNEL_AUDIO, channel_id)));
+    state.audio.ensure_capture_and_playback(&app);
     Ok(())
 }
 
@@ -382,6 +415,7 @@ pub async fn leave_voice(state: State<'_, AppState>) -> Result<(), String> {
     state.tcp.lock().await.send(serde_json::json!({
         "type": "leave_voice"
     }));
+    state.audio.set_voice_target(None);
     Ok(())
 }
 
@@ -447,25 +481,25 @@ pub async fn set_deafened(state: State<'_, AppState>, deafened: bool) -> Result<
 
 #[tauri::command]
 pub async fn set_mic_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
-    state.audio.set_mic_volume(volume).await;
+    state.audio.set_mic_volume(volume);
     let mut cfg = load_config();
-    cfg.mic_volume = (volume * 100.0) as u32;
+    cfg.mic_volume = (volume * 100.0).round() as u32;
     save_config(&cfg);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_output_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
-    state.audio.set_output_volume(volume).await;
+    state.audio.set_output_volume(volume);
     let mut cfg = load_config();
-    cfg.output_volume = (volume * 100.0) as u32;
+    cfg.output_volume = (volume * 100.0).round() as u32;
     save_config(&cfg);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_vad_threshold(state: State<'_, AppState>, threshold: f32) -> Result<(), String> {
-    state.audio.set_vad_threshold(threshold).await;
+    state.audio.set_vad_threshold(threshold);
     let mut cfg = load_config();
     cfg.vad_threshold = threshold;
     save_config(&cfg);
@@ -691,18 +725,28 @@ pub async fn get_room_members(state: State<'_, AppState>, room_id: String) -> Re
 }
 
 #[tauri::command]
+pub async fn get_audio_devices() -> Result<Value, String> {
+    Ok(AudioManager::get_devices())
+}
+
+#[tauri::command]
 pub async fn set_audio_devices(
+    app: AppHandle,
+    state: State<'_, AppState>,
     input_device: Option<u32>,
     output_device: Option<u32>,
 ) -> Result<(), String> {
     let mut cfg = load_config();
-    if let Some(in_dev) = input_device {
-        cfg.input_device = Some(in_dev);
-    }
-    if let Some(out_dev) = output_device {
-        cfg.output_device = Some(out_dev);
-    }
+    cfg.input_device = input_device;
+    state.audio.set_selected_input(input_device);
+    
+    cfg.output_device = output_device;
+    state.audio.set_selected_output(output_device);
+    
     save_config(&cfg);
+    
+    state.audio.restart_streams_if_active(&app);
+    
     Ok(())
 }
 
@@ -721,6 +765,18 @@ pub async fn set_ptt_config(
 }
 
 #[tauri::command]
+pub async fn set_noise_suppression(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.noise_suppression = enabled;
+    save_config(&cfg);
+    state.audio.set_noise_suppression(enabled);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn set_stream_settings(
     resolution: String,
     fps: u32,
@@ -735,20 +791,14 @@ pub async fn set_stream_settings(
 }
 
 #[tauri::command]
-pub async fn start_mic_test(app: AppHandle) -> Result<(), String> {
-    crate::net_tcp::dispatch_event(&app, "mic_test_level", serde_json::json!({
-        "level": 50,
-        "speaking": true
-    }));
+pub async fn start_mic_test(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.audio.start_mic_test_loop(app);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn stop_mic_test(app: AppHandle) -> Result<(), String> {
-    crate::net_tcp::dispatch_event(&app, "mic_test_level", serde_json::json!({
-        "level": 0,
-        "speaking": false
-    }));
+pub async fn stop_mic_test(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.audio.stop_mic_test_loop(app);
     Ok(())
 }
 
